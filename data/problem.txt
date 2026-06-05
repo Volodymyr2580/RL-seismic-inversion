@@ -1,0 +1,60 @@
+PS E:\sci_research\GRPO-FWI\data> python -m gdown --folder https://drive.google.com/drive/folders/1NGXnVG0gUFHfDcUvJxfozCgiI4WwquVk
+Retrieving folder contents
+Retrieving folder 1ry69BNdgG4eTIkKGbnTiYCVhjMKo0THw data
+Processing file 1xEhEndLfI_gC7fumBMtgh8d0KIAbNZrN data1.npy
+Processing file 1OKY3a8O09N1tnRJhx3MFlgUDUfas9cX3 data2.npy
+Processing file 1iF_14VQiVm1Bj1h7fGgWdY4-Rjf4VPGo data3.npy
+Processing file 1NTH0zZPw3dOiLlK2caHMqzzGl_srBEbl data4.npy
+Processing file 1-BS8x3zTgTsyf_91-UZvGAE3oFaAeKB- data5.npy
+Processing file 1CpRVrJ8Y0xnLA5Dnzlqv6JiP6q5v0cZC data6.npy
+Processing file 14Mlx4o91KQbnuTfSR4jFE8y1W76nMt80 data7.npy
+Processing file 10TltmqAiqik6AqdQrSBo4qCvaf5I_Eql data8.npy
+Processing file 1fEpCh0_swQFdztRi9LAN1I_6dL0XQcTM data9.npy
+Processing file 16DAUE1EsKjHtlkCOMcMmfazkKdZd65zk data10.npy
+Processing file 1iP3AFaHSIyiaiaOpFdFR6zjHXgN0raad data11.npy
+Processing file 1aXoLlaOiUy777BfSo9MJc02ucXj7VZ2i data12.npy
+Processing file 1gGU0EUUUE2eHIdzka1Tu7ev_DEU2LqVu data13.npy
+Processing file 1a1S5WZ53t8PM7gHx4lQCN2zDfRAyfGS9 data14.npy
+Processing file 1XuO5ivpDn2-8QzPXp-r0Y_M_K-m2ziRx data15.npy
+Processing file 1bgphgToOZgHIZllwKsO9CFiryKmU-gPQ data16.npy
+Processing file 1KNFLc5og5jprwtu3HnDbAvdjAHKvsnjb data17.npy
+Processing file 1-cXcJyux3kgmLujfwLP4qQ5lOJjCMj4O data18.npy
+Processing file 1Hia48156-E9MLBvIGx9mWlM5eOPl1h_j data19.npy
+Processing file 1lu0HecTWKP7tlbN9n_n1AsKVEZSuMAGe data20.npy
+Processing file 1Nd7_jsXsOAtDMS-49iqLHQO7Lo7k1W56 data21.npy
+Processing file 11von4SHMSWk6Wx2b2F_McdtpkGG1RbU- data22.npy
+Processing file 17w14l8fwmAlvC6kKlIZ0xT5RowmpVzKR data23.npy
+Processing file 1xGniI38rfo5JTiLirQYfdLRJ8GF7rN1z data24.npy
+Processing file 1pebIxP2aNvVNwWS9wEBzIis54BxcQ4e7 data25.npy
+Processing file 1_tNIWhxnMX7VnFAyU2eCFbTEPgmWLx3q data26.npy
+Processing file 1CDzkkSHVfTImZxrxa3v7w96yvxD6pXBA data27.npy
+Processing file 1l6HJeIaYFLOQvDlKqHDAVu3TQGKGnEip data28.npy
+Processing file 1fxrvsfufnSLcWYeFVdq68fqzv96QERDX data29.npy
+Processing file 1lpilFsF2bhEA1NgW8vMxcElyOAKGpHe_ data30.npy
+Processing file 1T44vHmaHWbUXY8coB4uzFliUKA1f7PBv data31.npy
+Processing file 1uZHBm87vxYzhTWMmyC0cYokqfRqB-AJ3 data32.npy
+Processing file 1KyhUHskoEOf3FxtMQW1yEgMzUWAAwtcm data33.npy
+Processing file 1ci7tV-9JZzkEFE-p-fCByNjSNJ9MYhdX data34.npy
+Processing file 1VYauh4lxDL3MnuLIjK3rVgkirKJ00hlK data35.npy
+Processing file 14VrGaVlrOteDJ_uygUNBpwlI8cWDVv43 data36.npy
+Processing file 1HfP9jr5O89ehu4IM3BAm3wlVL2GC62mY data37.npy
+Processing file 1aElBr6Usvjc-18_1a9NvcKTdL7wQVGYV data38.npy
+Processing file 1yIBFSQo2LAon6o7i6fjQtUHce98JdH62 data39.npy
+Processing file 1HbnZdf2uoe7r6nTZcnsX7Q0Jauz8Q4kl data40.npy
+Processing file 10idvLgTNZFR6RBiVdSiGstWTAmQmbghP data41.npy
+Processing file 1hfXI3bA6WMtMs7vHlpRYIRLyb4S_LqT0 data42.npy
+Processing file 1vhgNFUMfWQAIL2fle9F4vQ5UvmUoe3Mh data43.npy
+Processing file 1dW0h9Io4-4M1aVQgE7JX2rMpYu7ZHroV data44.npy
+Processing file 1fkxH8QjOu7lASVZe0095vTWDQ_akxOO1 data45.npy
+Processing file 1XHeH2_cIzr1Bgsv-2NITEFbFxW-yeuRv data46.npy
+Processing file 1gR0_sN2_a3a4mMgKK-J7PzzKjpFzd9-B data47.npy
+Processing file 1NNOfTwPUyBq6xae-i0vSD3SiFwm8rHvW data48.npy
+Processing file 1k1NAAlh_fUCSWh4RdigGh2R0Mdt9yyiA data49.npy
+Processing file 1YKLBdRghTZNRf-FpUyFZ4d89b7XtmMVn data50.npy
+Failed to retrieve folder contents:
+
+        The gdrive folder with url: https://drive.google.com/drive/folders/1ry        
+        69BNdgG4eTIkKGbnTiYCVhjMKo0THw?hl=en has more than 50 files, gdrive
+        can't download more than this limit.
+
+You can use `--remaining-ok` option to ignore this error.

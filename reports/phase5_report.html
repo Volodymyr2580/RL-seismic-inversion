@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 5 — Robust Reward Functions for RL-FWI | Complete Report</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]});"></script>
+<style>
+:root {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d;
+  --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  --orange: #FF6B35; --teal: #4ECDC4; --green: #6BCB77; --blue: #4D96FF;
+  --red: #f85149; --yellow: #d2991d;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  color: var(--text); background: var(--bg); line-height: 1.7;
+}
+body { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
+h1 { font-size: 2rem; border-bottom: 2px solid var(--accent); padding-bottom: 0.5rem; }
+h2 { font-size: 1.4rem; margin-top: 2.5rem; color: var(--accent); cursor: pointer; }
+h2 .arrow { display: inline-block; width: 1em; transition: transform 0.2s; }
+h2.open .arrow { transform: rotate(90deg); }
+h3 { font-size: 1.1rem; margin-top: 1.5rem; }
+.meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+blockquote { border-left: 3px solid var(--accent); margin: 1rem 0; padding: 0.5rem 1rem;
+             background: var(--surface); border-radius: 0 6px 6px 0; font-size: 0.93rem; color: var(--muted); }
+table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
+th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--surface); font-weight: 600; }
+tr:hover { background: rgba(88,166,255,0.05); }
+.rank-1 { color: #FFD700; font-weight: bold; }
+.rank-2 { color: #C0C0C0; font-weight: bold; }
+.rank-3 { color: #CD7F32; font-weight: bold; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+.tag-curr { background: rgba(255,107,53,0.2); color: var(--orange); }
+.tag-multi { background: rgba(78,205,196,0.2); color: var(--teal); }
+.tag-mixed { background: rgba(107,203,119,0.2); color: var(--green); }
+.tag-single { background: rgba(77,150,255,0.2); color: var(--blue); }
+.tag-warn { background: rgba(210,153,29,0.2); color: var(--yellow); }
+.tag-err { background: rgba(248,81,73,0.2); color: var(--red); }
+img { max-width: 100%; border-radius: 8px; margin: 1rem 0; border: 1px solid var(--border); }
+.finding { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; margin: 1rem 0; }
+.finding h4 { margin: 0 0 0.5rem 0; color: var(--accent); }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.best { background: rgba(255,215,0,0.08); }
+.algo-cmp td:first-child { font-weight: 600; white-space: nowrap; }
+.reward-detail { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; margin: 0.8rem 0; }
+.reward-detail h4 { margin: 0 0 0.4rem 0; }
+.reward-detail .lit { color: var(--muted); font-size: 0.85rem; }
+.reward-detail .formula { background: rgba(255,255,255,0.05); padding: 0.5rem 0.8rem; border-radius: 4px; margin: 0.5rem 0; overflow-x: auto; font-size: 0.9rem; }
+.note { color: var(--yellow); font-size: 0.88rem; }
+.warn { color: var(--red); font-size: 0.88rem; }
+.sticky-toc { position: fixed; top: 1rem; right: 1rem; background: var(--surface); border: 1px solid var(--border);
+              border-radius: 8px; padding: 0.8rem 1rem; font-size: 0.8rem; max-width: 180px; z-index: 10; }
+.sticky-toc a { color: var(--muted); text-decoration: none; display: block; padding: 2px 0; }
+.sticky-toc a:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<nav class="sticky-toc">
+  <strong style="color:var(--accent)">Contents</strong>
+  <a href="#sec0">0. GRPO/DAPO/GDPO</a>
+  <a href="#sec1">1. Final Ranking</a>
+  <a href="#sec2">2. Core Findings</a>
+  <a href="#sec3">3. Heatmap</a>
+  <a href="#sec4">4. Curriculum vs Mixed</a>
+  <a href="#sec5">5. Seed Robustness</a>
+  <a href="#sec6">6. Configuration</a>
+  <a href="#sec7">7. Reward Functions</a>
+  <a href="#sec8">8. Standard OT W₂</a>
+  <a href="#sec9">9. Code Changes</a>
+</nav>
+
+<h1>Phase 5 — Robust Reward Functions for RL-FWI</h1>
+<div class="meta">
+  <span>2026-05-26 ~ 06-02</span> <span>19 strategies × 16 models × 5 seeds</span>
+  <span>1,520 training runs</span> <span>4× RTX 4090, ~4.5 days</span>
+</div>
+<blockquote>
+  <strong>信息来源</strong>: 所有 reward 函数的文献来源和设计原理均来自 Wenzhe 撰写的
+  <code>phase4_reward_design_report.md</code>（导师文献综述）。
+</blockquote>
+
+<!-- ═══════════════════ 0. GRPO/DAPO/GDPO ═══════════════════ -->
+<h2 id="sec0" class="open" onclick="this.classList.toggle('open');document.getElementById('c0').classList.toggle('collapsed')">
+  <span class="arrow">▸</span> 0. GRPO / DAPO / GDPO — 算法比较</h2>
+<div id="c0">
+
+<table class="algo-cmp">
+<tr><th>特性</th><th>GRPO</th><th>DAPO</th><th>GDPO (当前)</th></tr>
+<tr><td>全称</td><td>Group Relative Policy Optimization</td><td>Decoupled Advantage PPO</td><td>Group Decoupled Policy Optimization</td></tr>
+<tr><td>文献</td><td>Schulman et al. 2017 (PPO);<br>Shariatmadar et al. (DeepWaveRL)</td><td>Schulman et al. 2017<br>(PPO, arXiv:1707.06347)</td><td>Dong et al., 2025<br>arXiv:2601.05242</td></tr>
+<tr><td>阶段</td><td>Phase 0-I</td><td>Phase I 后期</td><td>Phase II-V</td></tr>
+</table>
+
+<div class="reward-detail">
+<h4>GRPO — Group Relative Policy Optimization</h4>
+<div class="lit">Schulman et al. 2017 (PPO); Shariatmadar et al. (DeepWaveRL)</div>
+<div class="formula">$$A_g = \frac{R_g - \mu_G}{\sigma_G}$$</div>
+<p>$R_g$: 第 $g$ 个采样的 scalar reward。$\mu_G, \sigma_G$: 组内 $G=32$ 个采样的均值和标准差。<br>
+<strong>局限</strong>: 多个 reward 分量需事先手动融合为单一标量。</p>
+</div>
+
+<div class="reward-detail">
+<h4>DAPO — Decoupled Advantage PPO</h4>
+<div class="lit">Schulman et al. 2017 (PPO) — multi-reward independent normalization</div>
+<div class="formula">$$A = \sum_i w_i \cdot \mathrm{normalize}(R_i)$$</div>
+<p>每个 reward 分量 $R_i$ 独立全局标准化（减均值除标准差），然后加权求和。<br>
+<strong>改进</strong>: 解耦了多 reward 分量，但标准化粒度是全局的，丢失了组内相对排序信息。</p>
+</div>
+
+<div class="reward-detail">
+<h4>GDPO — Group Decoupled Policy Optimization <span class="tag tag-single">当前</span></h4>
+<div class="lit">Dong et al., 2025, arXiv:2601.05242</div>
+<div class="formula">
+$$A = \mathrm{batch\_norm}\!\left(\sum_i w_i \cdot \mathrm{group\_standardize}(R_i)\right)$$
+$$\mathrm{group\_standardize}(R_i) = \frac{R_i - \mu_{G,i}}{\sigma_{G,i} + \epsilon}$$
+</div>
+<p>每个 reward 分量 $R_i$ 在组内 $G$ 个采样上独立标准化，然后加权求和，最后 batch 全局标准化。<br>
+<strong>核心优势</strong>: 保留组内"哪个采样更好"的相对信号。即使 Wasserstein ($\sim -5000$) 和 Contrastive ($\sim 0.5$) 量级差 $10^4$ 倍，GDPO 自动处理。</p>
+</div>
+
+</div>
+
+<!-- ═══════════════════ 1. Ranking ═══════════════════ -->
+<h2 id="sec1" class="open" onclick="this.classList.toggle('open');document.getElementById('c1').classList.toggle('collapsed')">
+  <span class="arrow">▸</span> 1. Final Ranking</h2>
+<div id="c1">
+<img src="phase5_large_figures/01_ranking.png" alt="Mean MAE Ranking">
+<table>
+<tr><th>Rank</th><th>Strategy</th><th>Type</th><th>Mean MAE</th><th>Std</th></tr>
+<tr class="best"><td class="rank-1">1</td><td>C1 Wass→Contrastive</td><td><span class="tag tag-curr">Curriculum</span></td><td><strong>53.7</strong></td><td>30.8</td></tr>
+<tr class="best"><td class="rank-2">2</td><td>C2 Wass→L1+L2</td><td><span class="tag tag-curr">Curriculum</span></td><td><strong>56.2</strong></td><td>39.7</td></tr>
+<tr class="best"><td class="rank-3">3</td><td>C4 NCCm→Contrastive</td><td><span class="tag tag-curr">Curriculum</span></td><td><strong>60.4</strong></td><td>28.3</td></tr>
+<tr><td>4</td><td>C3 TT→Contrastive</td><td><span class="tag tag-curr">Curriculum</span></td><td>60.5</td><td>28.2</td></tr>
+<tr><td>5</td><td>C5 Wass→NCCm</td><td><span class="tag tag-curr">Curriculum</span></td><td>61.6</td><td>36.4</td></tr>
+<tr><td>6</td><td>Wass</td><td><span class="tag tag-single">Single</span></td><td>61.9</td><td>36.1</td></tr>
+<tr><td>7</td><td>Wass+AWI</td><td><span class="tag tag-multi">Multi-FWI</span></td><td>62.6</td><td>35.2</td></tr>
+<tr><td>8</td><td>Wass+NCCm</td><td><span class="tag tag-multi">Multi-FWI</span></td><td>64.5</td><td>35.4</td></tr>
+<tr><td>9</td><td>Wass+Contra</td><td><span class="tag tag-multi">Multi-FWI</span></td><td>64.7</td><td>35.5</td></tr>
+<tr><td>10</td><td>Wass+TT</td><td><span class="tag tag-mixed">Mixed+TT</span></td><td>65.3</td><td>35.7</td></tr>
+<tr><td>11</td><td>AWI</td><td><span class="tag tag-single">Single</span></td><td>65.6</td><td>34.5</td></tr>
+<tr><td>12</td><td>Env_NCC</td><td><span class="tag tag-single">Single</span></td><td>69.2</td><td>33.7</td></tr>
+<tr><td>13</td><td>NCC_maxlag</td><td><span class="tag tag-single">Single</span></td><td>70.6</td><td>31.7</td></tr>
+<tr><td>14</td><td>NCCm+TT</td><td><span class="tag tag-mixed">Mixed+TT</span></td><td>70.3</td><td>32.9</td></tr>
+<tr><td>15</td><td>Contra+NCCm</td><td><span class="tag tag-multi">Multi-FWI</span></td><td>70.3</td><td>33.0</td></tr>
+<tr><td>16</td><td>Contra+TT</td><td><span class="tag tag-mixed">Mixed+TT</span></td><td>72.7</td><td>31.4</td></tr>
+<tr><td>17</td><td>Contrastive</td><td><span class="tag tag-single">Single</span></td><td>90.1</td><td>63.2</td></tr>
+<tr><td>18</td><td>NCC_zero</td><td><span class="tag tag-single">Single</span></td><td>115.4</td><td>77.2</td></tr>
+<tr><td>19</td><td>Phase_func</td><td><span class="tag tag-single">Single</span></td><td>210.8</td><td>86.0</td></tr>
+</table>
+</div>
+
+<!-- ═══════════════════ 2. Findings ═══════════════════ -->
+<h2 id="sec2" class="open" onclick="this.classList.toggle('open');document.getElementById('c2').classList.toggle('collapsed')">
+  <span class="arrow">▸</span> 2. Core Findings</h2>
+<div id="c2">
+<div class="grid-2">
+<div class="finding"><h4>F1: Curriculum dominates</h4>Top 5 all curriculum. C1 (53.7) beats single Wass (61.9) by 8.2 pts. Confirmed 16 models × 5 seeds.</div>
+<div class="finding"><h4>F2: Wass best single</h4>Wass (61.9) &gt; AWI (65.6) &gt; Env_NCC (69.2) &gt; NCC_maxlag (70.6). CDF-based W₁ most robust.</div>
+<div class="finding"><h4>F3: Multi-FWI mixing ineffective</h4>Curriculum C1 (53.7) vs Mixed M4 (64.7) — 11-point gap.</div>
+<div class="finding"><h4>F4: Phase_func fails</h4>Mean 210.8. Amplitude essential for FWI.</div>
+<div class="finding"><h4>F5: Seed-stable</h4>Rankings stable within ±1 across 5 seeds.</div>
+<div class="finding"><h4>Bug Fixes</h4>Wasserstein: sorted-amp → CDF W₁ (222.6→67.0).<br>Hilbert: irfft → fft+ifft.</div>
+</div>
+</div>
+
+<!-- ═══════════════════ 3-5: Figures ═══════════════════ -->
+<h2 id="sec3" onclick="this.classList.toggle('open');document.getElementById('c3').classList.toggle('collapsed')">
+  <span class="arrow">▸</span> 3. Per-Model Heatmap</h2>
+<div id="c3" class="collapsed"><img src="phase5_large_figures/02_heatmap.png" alt="Heatmap"></div>
+
+<h2 id="sec4" onclick="this.classList.toggle('open');document.getElementById('c4').classList.toggle('collapsed')">
+  <span class="arrow">▸</span> 4. Curriculum vs Mixed</h2>
+<div id="c4" class="collapsed"><img src="phase5_large_figures/03_curriculum_vs_mixed.png" alt="Curriculum vs Mixed"></div>
+
+<h2 id="sec5" onclick="this.classList.toggle('open');document.getElementById('c5').classList.toggle('collapsed')">
+  <span class="arrow">▸</span> 5. Seed Robustness</h2>
+<div id="c5" class="collapsed"><img src="phase5_large_figures/04_seed_robustness.png" alt="Seed Robustness"></div>
+
+<!-- ═══════════════════ 6. Config ═══════════════════ -->
+<h2 id="sec6" onclick="this.classList.toggle('open');document.getElementById('c6').classList.toggle('collapsed')">
+  <span class="arrow">▸</span> 6. Experiment Configuration</h2>
+<div id="c6" class="collapsed">
+<table>
+<tr><th>Parameter</th><th>Value</th></tr>
+<tr><td>Policy</td><td>4×4 B-spline, Gaussian policy, 32 params</td></tr>
+<tr><td>Geometry</td><td>Transmission, 5 sources × 70 receivers</td></tr>
+<tr><td>Models</td><td>16 CVA (1,2,5,6,8,10,15,16,18,33,34,39,43,44,45,50)</td></tr>
+<tr><td>Seeds</td><td>42, 123, 456, 789, 101112</td></tr>
+<tr><td>Training</td><td>G=32, PPO epochs=4, lr=5e-3, 5000 steps</td></tr>
+<tr><td>Temperature</td><td>2.0→0.1 (anneal 1000), entropy=0.02</td></tr>
+</table>
+</div>
+
+<!-- ═══════════════════ 7. Reward Functions ═══════════════════ -->
+<h2 id="sec7" class="open" onclick="this.classList.toggle('open');document.getElementById('c7').classList.toggle('collapsed')">
+  <span class="arrow">▸</span> 7. Individual Reward Functions — Complete Reference</h2>
+<div id="c7">
+
+<div class="reward-detail">
+<h4>1. L2 Waveform Misfit <span class="tag tag-single">Single</span></h4>
+<div class="lit">Tarantola 1984</div>
+<div class="formula">$$R = -\|p_{\mathrm{pred}} - p_{\mathrm{obs}}\|^2$$</div>
+<p>Per-group sum over all time samples, shots, receivers. 对振幅误差和 cycle-skipping 敏感。</p>
+</div>
+
+<div class="reward-detail">
+<h4>2. L1+L2 Misfit <span class="tag tag-single">Single</span></h4>
+<div class="lit">Sign-preserving log L1 + L2</div>
+<div class="formula">$$R = -\big(\mathrm{L1}(\mathrm{sign\_log}(p_{\mathrm{pred}}), \mathrm{sign\_log}(p_{\mathrm{obs}})) + \mathrm{L2}(\cdots)\big)$$</div>
+</div>
+
+<div class="reward-detail">
+<h4>3. Wasserstein — CDF-based Time-Domain W₁ <span class="tag tag-single">Single</span> <span class="tag tag-warn">Simplified OT</span></h4>
+<div class="lit">Métivier et al. 2016; Wei et al. 2026</div>
+<div class="formula">
+$$d^+[t] = |d[t]|, \quad p[t] = \frac{d^+[t]}{\sum d^+[t]}, \quad C[t] = \sum_{\tau \le t} p[\tau]$$
+$$W_1 = \sum_t |C_{\mathrm{pred}}[t] - C_{\mathrm{obs}}[t]|, \quad R = -\sum_{\mathrm{traces}} W_1$$
+</div>
+<p class="note">This is a simplified 1D CDF-based W₁, not the full Kantorovich OT. Uses abs() for non-negativity and L1 of CDF differences. See Section 8 for the standard Métivier W₂ formulation.</p>
+</div>
+
+<div class="reward-detail">
+<h4>4. Contrastive <span class="tag tag-single">Single</span></h4>
+<div class="lit">Phase IV design</div>
+<div class="formula">$$R = 0.5 \cdot \mathrm{spec\_sim}(p_{\mathrm{pred}}, p_{\mathrm{obs}}) + 0.5 \cdot \max_\tau \mathrm{CC}(p_{\mathrm{pred}}, p_{\mathrm{obs}}; \tau)$$</div>
+</div>
+
+<div class="reward-detail">
+<h4>5. NCC_zero <span class="tag tag-single">Single</span></h4>
+<div class="lit">Liu et al. 2017, GJI</div>
+<div class="formula">$$\mathrm{ncc}_0 = \frac{\langle p_{\mathrm{pred}}, p_{\mathrm{obs}}\rangle}{\|p_{\mathrm{pred}}\| \cdot \|p_{\mathrm{obs}}\| + \epsilon}, \quad R = \mathrm{mean}(\mathrm{ncc}_0)$$</div>
+</div>
+
+<div class="reward-detail">
+<h4>6. NCC_maxlag <span class="tag tag-single">Single</span></h4>
+<div class="lit">Zhang et al. 2019, Geophysics</div>
+<div class="formula">$$R = \mathrm{mean}\!\left(\max_{\tau \in [-80,80]} \mathrm{CC}(\tau) - \lambda \cdot |\tau^*|\right), \quad \lambda = 0.005$$</div>
+</div>
+
+<div class="reward-detail">
+<h4>7. Envelope_NCC <span class="tag tag-single">Single</span></h4>
+<div class="lit">Oh & Alkhalifah 2018, GJI</div>
+<div class="formula">$$e = |\mathcal{H}(p)|, \quad R = \mathrm{NCC}(e_{\mathrm{pred}}, e_{\mathrm{obs}})$$</div>
+<p>Hilbert envelope → NCC. Produces artificial low frequencies for background velocity recovery.</p>
+</div>
+
+<div class="reward-detail">
+<h4>8. AWI — Adaptive Waveform Inversion <span class="tag tag-single">Single</span></h4>
+<div class="lit">Warner & Guasch 2016, Geophysics</div>
+<div class="formula">
+$$W(\omega) = \frac{P_{\mathrm{obs}} \cdot P_{\mathrm{pred}}^*}{|P_{\mathrm{pred}}|^2 + \epsilon}, \quad w[t] = \mathrm{IFFT}(W)$$
+$$R = -\frac{\langle |t| \cdot w[t]^2 \rangle}{\langle w[t]^2 \rangle}$$
+</div>
+<p>Wiener matching filter time-spread penalty. If velocity correct, w ≈ δ(t).</p>
+</div>
+
+<div class="reward-detail">
+<h4>9. Phase_func <span class="tag tag-single">Single</span> <span class="tag tag-err">Failed</span></h4>
+<div class="lit">Wenzhe (proposed)</div>
+<div class="formula">$$X = \mathrm{FFT}(x),\; X_{\mathrm{norm}} = X/|X|,\; x_{\mathrm{phase}} = \mathrm{IFFT}(X_{\mathrm{norm}}),\; R = -\|x_{\mathrm{phase}}^{\mathrm{pred}} - x_{\mathrm{phase}}^{\mathrm{obs}}\|^2$$</div>
+<p class="warn">Implemented correctly per specification but fundamentally fails (mean 210.8). Amplitude normalization destroys essential physical information.</p>
+</div>
+
+<div class="reward-detail">
+<h4>10. TT — Travel-Time <span class="tag tag-single">Single</span></h4>
+<div class="lit">Allen 1978 (STA/LTA); Luo & Schuster 1991 (WTI)</div>
+<div class="formula">$$R = -|t_{\mathrm{first}}(p_{\mathrm{pred}}) - t_{\mathrm{first}}(p_{\mathrm{obs}})|$$</div>
+<p>STA/LTA energy-ratio picker, GPU-batched PyTorch implementation.</p>
+</div>
+
+</div>
+
+<!-- ═══════════════════ 8. Standard OT W₂ ═══════════════════ -->
+<h2 id="sec8" class="open" onclick="this.classList.toggle('open');document.getElementById('c8').classList.toggle('collapsed')">
+  <span class="arrow">▸</span> 8. Standard OT W₂ — Métivier et al. 2016 <span style="color:#FFD700;font-size:0.8em;">NEW</span></h2>
+<div id="c8">
+
+<div class="reward-detail">
+<h4>Wasserstein_W₂ — Quadratic Optimal Transport <span class="tag tag-warn">Training</span></h4>
+<div class="lit">Métivier et al. 2016, GJI</div>
+<div class="formula">
+$$\tilde{s}(t) = \frac{s(t)^2 + \eta}{\int (s(t)^2 + \eta)\,dt}, \quad \eta = 10^{-3}$$
+$$F(t) = \sum_{\tau \le t} \tilde{s}(\tau), \quad F^{-1}(\alpha) = \mathrm{searchsorted}(F, \alpha)$$
+$$W_2^2 = \frac{1}{Q}\sum_{k=1}^{Q} \big(F^{-1}_{\mathrm{pred}}(\alpha_k) - F^{-1}_{\mathrm{obs}}(\alpha_k)\big)^2, \quad Q=500$$
+$$R = -\sum_{\mathrm{traces}} W_2$$
+</div>
+
+<table>
+<tr><th></th><th>W₁ (CDF, existing)</th><th>W₂ (Quantile, new)</th></tr>
+<tr><td>Non-negativity</td><td>$|d[t]|$ (absolute)</td><td>$d[t]^2 + \eta$ (squared + baseline, Métivier)</td></tr>
+<tr><td>Distance</td><td>$W_1 = \sum|\Delta\mathrm{CDF}|$ (L1)</td><td>$W_2^2 = \mathrm{mean}(|\Delta F^{-1}|^2)$ (L2)</td></tr>
+<tr><td>Fidelity to Métivier 2016</td><td>Simplified</td><td>Exact formula match</td></tr>
+<tr><td>Status</td><td>Complete</td><td>16 models × 5 seeds running</td></tr>
+</table>
+</div>
+
+</div>
+
+<!-- ═══════════════════ 9. Code Changes ═══════════════════ -->
+<h2 id="sec9" onclick="this.classList.toggle('open');document.getElementById('c9').classList.toggle('collapsed')">
+  <span class="arrow">▸</span> 9. Code Changes</h2>
+<div id="c9" class="collapsed">
+<table>
+<tr><th>File</th><th>Changes</th></tr>
+<tr><td><code>agents/fwi_rewards.py</code></td><td>Rewrote Wasserstein, fixed hilbert_envelope, added NCC/AWI/Phase_func/W₂ (530 lines)</td></tr>
+<tr><td><code>agents/rl_objectives.py</code></td><td>Added fwi2 to RewardWeights + gdpo_advantage</td></tr>
+<tr><td><code>train_rl_fwi.py</code></td><td>Added --fwi_type2, multi-FWI mixing, reward hacking detection</td></tr>
+</table>
+</div>
+
+<p style="text-align:center; color:var(--muted); margin-top:3rem; font-size:0.85rem;">
+  Phase 5 Complete Report · Generated 2026-06-02 · Sherlock &amp; Wenzhe
+</p>
+
+</body>
+</html>

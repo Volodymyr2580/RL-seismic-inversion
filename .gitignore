@@ -1,0 +1,42 @@
+# Large data files
+runs/
+outputs/
+*.npy
+*.pt
+*.pth
+*.h5
+*.hdf5
+
+# Reports (generated)
+reports/phase5_visualizations/
+reports/phase5_figures/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Logs
+*.log
+log_*.txt
+
+# Data
+data/CVA/
+data/CVB_model/
+data/FVA_model/
+data/smooth_models/
+data/smooth_models_v2/
+
+# IDE
+.vscode/
+.idea/
+
+# Archives
+archive/
+example_to_dyy/
+
+# Papers (PDFs)
+papers/
+
+# Misc
+.DS_Store
