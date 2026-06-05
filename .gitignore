@@ -10,6 +10,10 @@ outputs/
 # Reports (generated)
 reports/phase5_visualizations/
 reports/phase5_figures/
+reports/phase5_final/
+figures/
+results/
+.codex_pdf_text/
 
 # Python
 __pycache__/
@@ -37,6 +41,12 @@ example_to_dyy/
 
 # Papers (PDFs)
 papers/
+*.pdf
+*.pptx
+
+# Local duplicated notes
+lit_review/
+汇报ppt/
 
 # Misc
 .DS_Store
