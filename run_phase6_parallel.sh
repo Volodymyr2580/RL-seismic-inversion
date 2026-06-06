@@ -61,6 +61,23 @@ is_running_out_dir() {
     pgrep -af "train_rl_fwi.py .*--out_dir ${OUT}" >/dev/null 2>&1
 }
 
+has_visuals() {
+    local OUT=$1
+    [ -f "$OUT/phase6_visuals/models_residuals_curves.png" ] && \
+        [ -f "$OUT/phase6_visuals/shot_wiggle_overlays.png" ]
+}
+
+run_visualization() {
+    local GPU=$1
+    local IDX=$2
+    local OUT=$3
+    local RUN_LOG=$4
+
+    log "VIS gpu=${GPU} reward=${REWARD} cva=${IDX} seed=${SEED}"
+    CUDA_VISIBLE_DEVICES=$GPU $PY scripts/viz_phase6_single_reward.py --run_dir "$OUT" --device cuda >> "$RUN_LOG" 2>&1 || \
+        log "WARN visualization failed reward=${REWARD} cva=${IDX} seed=${SEED}"
+}
+
 run_model() {
     local GPU=$1
     local IDX=$2
@@ -71,6 +88,9 @@ run_model() {
 
     if [ -f "$OUT/policy_final.pt" ] && [ -f "$OUT/final_velocity.npy" ]; then
         log "SKIP completed reward=${REWARD} cva=${IDX} seed=${SEED}"
+        if ! has_visuals "$OUT"; then
+            run_visualization "$GPU" "$IDX" "$OUT" "$RUN_LOG"
+        fi
         return 0
     fi
     if is_running_out_dir "$OUT"; then
@@ -85,9 +105,7 @@ run_model() {
         --steps 5000 --out_dir "$OUT" > "$RUN_LOG" 2>&1
     log "DONE gpu=${GPU} reward=${REWARD} cva=${IDX} seed=${SEED}"
 
-    log "VIS gpu=${GPU} reward=${REWARD} cva=${IDX} seed=${SEED}"
-    CUDA_VISIBLE_DEVICES=$GPU $PY scripts/viz_phase6_single_reward.py --run_dir "$OUT" --device cuda >> "$RUN_LOG" 2>&1 || \
-        log "WARN visualization failed reward=${REWARD} cva=${IDX} seed=${SEED}"
+    run_visualization "$GPU" "$IDX" "$OUT" "$RUN_LOG"
 }
 
 worker() {
