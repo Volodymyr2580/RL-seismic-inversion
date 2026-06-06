@@ -53,7 +53,7 @@ class RewardCalculator:
         if v_model_2d.ndim != 2:
             raise ValueError(f"v_model_2d 必须是 2D，得到 {tuple(v_model_2d.shape)}")
         if obs_seismic.ndim != 3:
-            raise ValueError(f"obs_seismic 必须是 3D [shot,time,receiver]，得到 {tuple(obs_seismic.shape)}")
+            raise ValueError(f"obs_seismic 必须是 3D [shot,receiver,time]，得到 {tuple(obs_seismic.shape)}")
 
         try:
             from example_to_dyy.funcs.RTM import rtm_imaging_batch_all_forw
@@ -67,11 +67,11 @@ class RewardCalculator:
         n_receivers = int(self.geom.n_receivers)
         nt = int(self.geom.nt)
 
-        if obs_seismic.shape != (n_shots, nt, n_receivers):
-            raise ValueError(f"obs_seismic shape 期望 {(n_shots, nt, n_receivers)}，得到 {tuple(obs_seismic.shape)}")
+        if obs_seismic.shape != (n_shots, n_receivers, nt):
+            raise ValueError(f"obs_seismic shape 期望 {(n_shots, n_receivers, nt)}，得到 {tuple(obs_seismic.shape)}")
 
         source_locations, receiver_locations, source_amplitudes = self.forward._get_cached_io(device)
-        obsv_data_masked = obs_seismic.permute(0, 2, 1).contiguous()
+        obsv_data_masked = obs_seismic.contiguous()
         image = torch.zeros_like(v_model_2d, dtype=torch.float32, device=device)
         h = rtm_imaging_batch_all_forw(
             image=image,

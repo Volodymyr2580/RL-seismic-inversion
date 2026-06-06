@@ -1,6 +1,9 @@
 """
 FWI data-misfit reward variants — alternatives to raw L2.
-All operate on [G, n_shots, nt, n_receivers] tensors, return [G] rewards.
+All operate on the training pipeline's canonical layout:
+  p_pred: [G, n_shots, n_receivers, nt]
+  p_obs:  [n_shots, n_receivers, nt]
+and return [G] rewards.
 """
 from __future__ import annotations
 import torch
@@ -19,6 +22,34 @@ def lowpass_filter(x: torch.Tensor, cutoff_hz: float, dt: float = 0.001) -> torc
     X = torch.fft.rfft(x, dim=-1)
     mask = torch.clamp((1.2 * cutoff_hz - freqs) / (0.2 * cutoff_hz + 1e-10), 0.0, 1.0)
     return torch.fft.irfft(X * mask, n=nt, dim=-1)
+
+
+def _flatten_traces(
+    p_pred: torch.Tensor,
+    p_obs: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Flatten canonical seismic tensors to per-trace time series.
+
+    The forward simulator returns [G, shot, receiver, time], so the time axis is
+    already last. This helper makes that contract explicit for every reward that
+    computes trace-wise temporal objectives such as NCC, OT, AWI, and phase loss.
+    """
+    if p_pred.ndim != 4:
+        raise ValueError(f"p_pred must be [G, shot, receiver, time], got {tuple(p_pred.shape)}")
+    if p_obs.ndim != 3:
+        raise ValueError(f"p_obs must be [shot, receiver, time], got {tuple(p_obs.shape)}")
+    if tuple(p_pred.shape[1:]) != tuple(p_obs.shape):
+        raise ValueError(
+            "p_pred and p_obs shapes are incompatible: "
+            f"p_pred[1:]={tuple(p_pred.shape[1:])}, p_obs={tuple(p_obs.shape)}"
+        )
+
+    G, n_shots, n_receivers, nt = p_pred.shape
+    n_traces = n_shots * n_receivers
+    return (
+        p_pred.reshape(G, n_traces, nt).contiguous(),
+        p_obs.reshape(n_traces, nt).contiguous(),
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -50,7 +81,7 @@ def reward_envelope(
 ) -> torch.Tensor:
     """Envelope L2 misfit: -||env(pred) - env(obs)||² per group."""
     G = p_pred.shape[0]
-    # p_pred: [G, n_shots, nt, nr], p_obs: [n_shots, nt, nr]
+    # p_pred: [G, n_shots, n_receivers, nt], p_obs: [n_shots, n_receivers, nt]
     p_obs_batch = p_obs.unsqueeze(0).expand(G, -1, -1, -1)
     env_pred = hilbert_envelope(p_pred)
     env_obs = hilbert_envelope(p_obs_batch)
@@ -71,25 +102,22 @@ def reward_windowed_l2(
     """L2 misfit in a time window around the observed first arrival."""
     from agents.traveltime_reward import first_arrival_energy_ratio
 
-    G, n_shots, nt, nr = p_pred.shape
+    G = p_pred.shape[0]
     device = p_pred.device
-
-    # Get TT picker reference (from obs, shared across groups)
-    p_obs_2d = p_obs.permute(0, 2, 1).reshape(-1, nt)  # [n_shots*nr, nt]
+    p_pred_2d, p_obs_2d = _flatten_traces(p_pred, p_obs)
+    nt = p_pred_2d.shape[-1]
     t_obs = first_arrival_energy_ratio(p_obs_2d, dt=dt)  # [n_traces]
-
     n_traces = t_obs.shape[0]
-    p_pred_2d = p_pred.permute(0, 1, 3, 2).reshape(G, -1, nt)  # [G, n_traces, nt]
 
     rewards = torch.zeros(G, device=device)
     for g in range(G):
-        total = 0.0
+        total = torch.zeros((), device=device)
         for tr in range(n_traces):
             t0 = int(t_obs[tr] / dt)
             start = max(0, t0 - win_before)
             end = min(nt, t0 + win_after)
             diff = p_pred_2d[g, tr, start:end] - p_obs_2d[tr, start:end]
-            total += (diff ** 2).sum().item()
+            total = total + (diff ** 2).sum()
         rewards[g] = -total
     return rewards
 
@@ -163,16 +191,11 @@ def reward_wasserstein(
 ) -> torch.Tensor:
     """Wasserstein-1 misfit in TIME domain (CDF-based), per trace, summed over shots & receivers.
     
-    p_pred: [G, n_shots, nt, nr]   p_obs: [n_shots, nt, nr]
+    p_pred: [G, n_shots, n_receivers, nt]   p_obs: [n_shots, n_receivers, nt]
     normalize: "abs" | "square" | "envelope"
     Returns: [G]  (negative W₁, higher = better)
     """
-    G, n_shots, nt, nr = p_pred.shape
-    n_traces = n_shots * nr
-
-    # Reshape to per-trace 1D signals
-    p_pred_2d = p_pred.permute(0, 1, 3, 2).reshape(G, n_traces, nt)  # [G, n_traces, nt]
-    p_obs_2d  = p_obs.permute(0, 2, 1).reshape(n_traces, nt)          # [n_traces, nt]
+    p_pred_2d, p_obs_2d = _flatten_traces(p_pred, p_obs)
 
     w1_per_trace = _cdf_wasserstein1(p_pred_2d, p_obs_2d, normalize=normalize)  # [G, n_traces]
     w_groups = w1_per_trace.sum(dim=1)  # [G]
@@ -243,14 +266,10 @@ def reward_wasserstein_w2(
 ) -> torch.Tensor:
     """Standard OT W₂ misfit (Métivier et al. 2016), per trace, summed.
     
-    p_pred: [G, n_shots, nt, nr]   p_obs: [n_shots, nt, nr]
+    p_pred: [G, n_shots, n_receivers, nt]   p_obs: [n_shots, n_receivers, nt]
     Returns: [G]  (negative W₂, higher = better)
     """
-    G, n_shots, nt, nr = p_pred.shape
-    n_traces = n_shots * nr
-
-    p_pred_2d = p_pred.permute(0, 1, 3, 2).reshape(G, n_traces, nt)
-    p_obs_2d  = p_obs.permute(0, 2, 1).reshape(n_traces, nt)
+    p_pred_2d, p_obs_2d = _flatten_traces(p_pred, p_obs)
 
     w2_per_trace = _wasserstein2_1d(p_pred_2d, p_obs_2d, eta=eta)  # [G, n_traces]
     w_groups = w2_per_trace.sum(dim=1)  # [G]
@@ -281,7 +300,8 @@ def trace_corr_max(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     N = x.shape[-1]
     X = torch.fft.rfft(x_n.contiguous(), n=2*N, dim=-1)
     Y = torch.fft.rfft(y_n.contiguous(), n=2*N, dim=-1)
-    corr = torch.fft.irfft(X * Y.conj(), n=2*N, dim=-1)[..., :N] / N
+    corr_full = torch.fft.irfft(X * Y.conj(), n=2*N, dim=-1) / N
+    corr = torch.cat([corr_full[..., -(N - 1):], corr_full[..., :N]], dim=-1)
     return corr.max(dim=-1).values
 
 
@@ -292,10 +312,8 @@ def reward_contrastive(
     cc_weight: float = 0.5,
 ) -> torch.Tensor:
     """Contrastive reward: spectrum similarity + max cross-correlation."""
-    G, n_shots, nt, nr = p_pred.shape
-    n_traces_per_group = n_shots * nr
-    p_pred_2d = p_pred.permute(0, 1, 3, 2).reshape(G, n_traces_per_group, nt).contiguous()
-    p_obs_2d = p_obs.permute(0, 2, 1).reshape(-1, nt).contiguous()
+    G = p_pred.shape[0]
+    p_pred_2d, p_obs_2d = _flatten_traces(p_pred, p_obs)
 
     rewards = torch.zeros(G, device=p_pred.device)
     for g in range(G):
@@ -336,6 +354,7 @@ def _ncc_maxlag_fft(
     lag:     optimal shift in samples (negative = x leads y)
     """
     B, N = x.shape
+    lag_max = min(int(lag_max), N - 1)
     # Zero-mean, unit-norm
     xm = x - x.mean(dim=-1, keepdim=True)
     ym = y - y.mean(dim=-1, keepdim=True)
@@ -376,15 +395,13 @@ def reward_ncc_zero(
     
     Range: [-1, 1] per trace, averaged → higher = better waveform shape match.
     """
-    G, n_shots, nt, nr = p_pred.shape
-    n_traces = n_shots * nr
-
-    p_pred_2d = p_pred.permute(0, 1, 3, 2).reshape(G, n_traces, nt)  # [G, T, nt]
-    p_obs_2d = p_obs.permute(0, 2, 1).reshape(1, n_traces, nt)       # [1, T, nt]
+    G = p_pred.shape[0]
+    p_pred_2d, p_obs_2d = _flatten_traces(p_pred, p_obs)
+    n_traces = p_pred_2d.shape[1]
 
     # Compute per-trace NCC
-    ncc = _ncc_zero(p_pred_2d.reshape(G * n_traces, nt),
-                    p_obs_2d.expand(G, -1, -1).reshape(G * n_traces, nt))
+    ncc = _ncc_zero(p_pred_2d.reshape(G * n_traces, -1),
+                    p_obs_2d.unsqueeze(0).expand(G, -1, -1).reshape(G * n_traces, -1))
     ncc = ncc.reshape(G, n_traces)  # [G, n_traces]
 
     return ncc.mean(dim=1)  # [G] in [-1, 1]
@@ -403,18 +420,14 @@ def reward_ncc_maxlag(
     
     Encourages both high correlation AND zero time-lag.
     """
-    G, n_shots, nt, nr = p_pred.shape
-    n_traces = n_shots * nr
-    device = p_pred.device
-
-    p_pred_2d = p_pred.permute(0, 1, 3, 2).reshape(G, n_traces, nt)  # [G, T, nt]
-    p_obs_2d = p_obs.permute(0, 2, 1).reshape(1, n_traces, nt)       # [1, T, nt]
+    G = p_pred.shape[0]
+    p_pred_2d, p_obs_2d = _flatten_traces(p_pred, p_obs)
 
     all_ncc = []
     all_penalty = []
     for g in range(G):
         ncc_max, lag_opt = _ncc_maxlag_fft(
-            p_pred_2d[g], p_obs_2d[0], lag_max=lag_max
+            p_pred_2d[g], p_obs_2d, lag_max=lag_max
         )  # ncc_max: [n_traces], lag_opt: [n_traces]
         all_ncc.append(ncc_max)
         all_penalty.append(lag_penalty * lag_opt.abs().float())
@@ -443,19 +456,16 @@ def reward_envelope_ncc(
     Steps: signal → envelope → zero-mean → NCC → mean over traces.
     Range: [-1, 1], higher = better envelope shape match.
     """
-    G, n_shots, nt, nr = p_pred.shape
-    n_traces = n_shots * nr
-
-    # Compute envelopes
-    p_pred_2d = p_pred.permute(0, 1, 3, 2).reshape(G, n_traces, nt)
-    p_obs_2d = p_obs.permute(0, 2, 1).reshape(1, n_traces, nt)
+    G = p_pred.shape[0]
+    p_pred_2d, p_obs_2d = _flatten_traces(p_pred, p_obs)
+    n_traces = p_pred_2d.shape[1]
 
     env_pred = hilbert_envelope(p_pred_2d)    # [G, T, nt]
-    env_obs = hilbert_envelope(p_obs_2d)       # [1, T, nt]
+    env_obs = hilbert_envelope(p_obs_2d)       # [T, nt]
 
     # NCC on envelopes
-    ncc = _ncc_zero(env_pred.reshape(G * n_traces, nt),
-                    env_obs.expand(G, -1, -1).reshape(G * n_traces, nt))
+    ncc = _ncc_zero(env_pred.reshape(G * n_traces, -1),
+                    env_obs.unsqueeze(0).expand(G, -1, -1).reshape(G * n_traces, -1))
     ncc = ncc.reshape(G, n_traces)
 
     return ncc.mean(dim=1)  # [G]
@@ -510,12 +520,10 @@ def reward_awi(
     version='full': R = -(α·|τ_center| + β·τ_spread)
                     (separates shift from spread, more principled)
     """
-    G, n_shots, nt, nr = p_pred.shape
-    n_traces = n_shots * nr
+    G = p_pred.shape[0]
     device = p_pred.device
-
-    p_pred_2d = p_pred.permute(0, 1, 3, 2).reshape(G, n_traces, nt)
-    p_obs_2d = p_obs.permute(0, 2, 1).reshape(1, n_traces, nt)
+    p_pred_2d, p_obs_2d = _flatten_traces(p_pred, p_obs)
+    nt = p_pred_2d.shape[-1]
 
     # Time index tensor for moment calculations (zero-centered)
     t_idx = torch.arange(nt, device=device, dtype=torch.float32)
@@ -524,7 +532,7 @@ def reward_awi(
 
     rewards = torch.zeros(G, device=device)
     for g in range(G):
-        w = _awi_matching_filter(p_pred_2d[g], p_obs_2d[0], eps=eps)  # [T, nt]
+        w = _awi_matching_filter(p_pred_2d[g], p_obs_2d, eps=eps)  # [T, nt]
         w2 = w ** 2                                                    # [T, nt]
         w2_sum = w2.sum(dim=-1).clamp(min=1e-10)                       # [T]
 
@@ -564,13 +572,13 @@ def reward_phase_func(
     p_pred: torch.Tensor, p_obs: torch.Tensor,
 ) -> torch.Tensor:
     """Phase-only L2 misfit: -||phase_only(pred) - phase_only(obs)||² per group."""
-    G, n_shots, nt, nr = p_pred.shape
-    n_traces = n_shots * nr
-    p_pred_2d = p_pred.permute(0, 1, 3, 2).reshape(G * n_traces, nt)
-    p_obs_2d = p_obs.permute(0, 2, 1).reshape(n_traces, nt)
+    G = p_pred.shape[0]
+    p_pred_traces, p_obs_2d = _flatten_traces(p_pred, p_obs)
+    n_traces = p_pred_traces.shape[1]
+    p_pred_2d = p_pred_traces.reshape(G * n_traces, -1)
     phase_pred = _phase_only_signal(p_pred_2d)
     phase_obs = _phase_only_signal(p_obs_2d)
-    phase_obs_exp = phase_obs.unsqueeze(0).expand(G, -1, -1).reshape(G * n_traces, nt)
+    phase_obs_exp = phase_obs.unsqueeze(0).expand(G, -1, -1).reshape(G * n_traces, -1)
     diff2 = (phase_pred - phase_obs_exp) ** 2
     l2_per_group = diff2.sum(dim=-1).reshape(G, n_traces).sum(dim=1)
     return -l2_per_group

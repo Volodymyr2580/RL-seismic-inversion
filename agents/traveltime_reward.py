@@ -70,28 +70,39 @@ def traveltime_reward(
     Travel-time reward.  Returns [G] tensor (0 = perfect).
 
     Accepts two layouts (auto-detected):
-      • [G, n_shots, nt, n_receivers]  — from simulate_batch  (4-D)
-      • [G, nt, n_receivers]            — single-shot fallback (3-D)
+      • [G, n_shots, n_receivers, nt]  — from simulate_batch  (4-D)
+      • [G, n_receivers, nt]            — single-shot fallback (3-D)
 
-    p_obs: [n_shots, nt, n_receivers] — single-shot ground truth.
+    p_obs: [n_shots, n_receivers, nt] or [n_traces, nt].
     """
     if p_pred.ndim == 4:
-        G, n_shots, nt, nr = p_pred.shape
-        p_pred_2d = p_pred.permute(0, 1, 3, 2).reshape(-1, nt)    # [G*n_shots*nr, nt]
+        G, n_shots, nr, nt = p_pred.shape
+        p_pred_2d = p_pred.reshape(-1, nt)                         # [G*n_shots*nr, nt]
     elif p_pred.ndim == 3:
-        G, nt, nr = p_pred.shape
+        G, nr, nt = p_pred.shape
         n_shots = 1
-        p_pred_2d = p_pred.transpose(1, 2).reshape(-1, nt)         # [G*nr, nt]
+        p_pred_2d = p_pred.reshape(-1, nt)                         # [G*nr, nt]
     else:
         raise ValueError(f"p_pred must be 3-D or 4-D, got {p_pred.shape}")
 
     if p_obs.ndim == 3:
-        _, nt_obs, nr_obs = p_obs.shape
-        p_obs_2d = p_obs.permute(0, 2, 1).reshape(-1, nt_obs)     # [n_shots*nr, nt]
+        obs_shots, obs_nr, nt_obs = p_obs.shape
+        p_obs_2d = p_obs.reshape(-1, nt_obs)                      # [n_shots*nr, nt]
     elif p_obs.ndim == 2:
         p_obs_2d = p_obs  # already [n_traces, nt]
+        obs_shots = n_shots
+        obs_nr = p_obs.shape[0] // max(1, n_shots)
+        nt_obs = p_obs.shape[1]
     else:
         raise ValueError(f"p_obs must be 2-D or 3-D, got {p_obs.shape}")
+    if nt_obs != nt:
+        raise ValueError(f"p_pred and p_obs time lengths differ: {nt} vs {nt_obs}")
+    expected_traces = n_shots * nr
+    if p_obs_2d.shape[0] != expected_traces:
+        raise ValueError(
+            f"p_obs trace count {p_obs_2d.shape[0]} does not match p_pred "
+            f"n_shots*n_receivers={expected_traces}"
+        )
 
     t_obs = first_arrival_energy_ratio(p_obs_2d, dt=dt)            # [n_traces]
     n_traces = t_obs.shape[0]

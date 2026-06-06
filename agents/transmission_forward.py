@@ -146,7 +146,7 @@ class AcquisitionForward:
             device: torch device string.
 
         Returns:
-            seismogram: [n_shots, nt, n_receivers]
+            seismogram: [n_shots, n_receivers, nt]
         """
         g = self.geom
         nbc = g.pml_width
@@ -173,7 +173,7 @@ class AcquisitionForward:
             pml_width=nbc,
             pml_freq=g.freq,
         )
-        rec = out[-1]  # receiver data: [n_shots, nt, n_receivers]
+        rec = out[-1]  # deepwave receiver data: [n_shots, nt, n_receivers]
         return rec.permute(0, 2, 1).contiguous()  # → [n_shots, n_receivers, nt]
 
     @torch.no_grad()

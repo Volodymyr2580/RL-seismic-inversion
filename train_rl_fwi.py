@@ -339,9 +339,10 @@ def make_summary_figure(
     vmin_s = float(np.percentile(p_obs_np[shot_idx], 2))
     vmax_s = float(np.percentile(p_obs_np[shot_idx], 98))
 
-    # Shot gather: deepwave outputs [n_shots, nt, n_receivers] → shot[nt, n_recv]
+    # Shot gather: AcquisitionForward returns [n_shots, n_receivers, nt].
+    # imshow expects rows as y/time and columns as x/receiver, so transpose one shot.
     # extent: time 0→1s (1000 steps × 0.001s), receivers 0→0.7km (70 × 10m)
-    axes[1, 0].imshow(p_obs_np[shot_idx], aspect="auto", cmap="seismic",
+    axes[1, 0].imshow(p_obs_np[shot_idx].T, aspect="auto", cmap="seismic",
                        vmin=vmin_s, vmax=vmax_s, origin="upper",
                        extent=[0, 0.7, 1.0, 0])
     axes[1, 0].set_title(f"Observed Shot {shot_idx}")
@@ -769,6 +770,7 @@ def train(config: TrainConfig):
 
     # ---- Training state ----
     os.makedirs(config.out_dir, exist_ok=True)
+    np.save(os.path.join(config.out_dir, "true_velocity.npy"), v_true.detach().cpu().numpy())
 
     # Save config
     config_path = os.path.join(config.out_dir, "config.json")
@@ -1213,6 +1215,27 @@ def train(config: TrainConfig):
     # Save final policy
     final_path = os.path.join(config.out_dir, "policy_final.pt")
     torch.save(policy.state_dict(), final_path)
+
+    # Save final converged model for post-run visualization.
+    with torch.no_grad():
+        if config.policy_type in ("learnable", "mean"):
+            alpha_p, beta_p = policy.forward()
+            u_mean = alpha_p / (alpha_p + beta_p)
+            v_ctrl_final = unit_to_velocity(u_mean.squeeze(0), config.v_min, config.v_max)
+            v_final = reconstructor.reconstruct(v_ctrl_final).squeeze(0)
+        elif config.policy_type == "gaussian":
+            u_mean = torch.sigmoid(policy.mu).unsqueeze(0)
+            v_ctrl_final = unit_to_velocity(u_mean.squeeze(0), config.v_min, config.v_max)
+            v_final = reconstructor.reconstruct(v_ctrl_final).squeeze(0)
+        elif config.policy_type == "latent":
+            z_mean = policy.mu.unsqueeze(0)
+            v_final = vae_decoder.decode(z_mean).squeeze(0).squeeze(0)
+        else:
+            alpha_p, beta_p = policy.forward(p_data_input)
+            u_mean = alpha_p / (alpha_p + beta_p)
+            v_ctrl_final = unit_to_velocity(u_mean.squeeze(0), config.v_min, config.v_max)
+            v_final = reconstructor.reconstruct(v_ctrl_final).squeeze(0)
+    np.save(os.path.join(config.out_dir, "final_velocity.npy"), v_final.detach().cpu().numpy())
 
     # ---- Decoder fine-tuning (if unfrozen) ----
     if config.policy_type == "latent" and config.unfreeze_decoder > 0 and best_mae_payload is not None:
