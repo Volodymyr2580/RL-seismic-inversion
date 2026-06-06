@@ -31,6 +31,27 @@ N_GPUS=${#GPUS[@]}
 COMMON="--policy_type gaussian --model_source smooth --smooth_root data/smooth_models_v2 --geometry transmission --best_criterion l2 --group_size 32 --ppo_epochs 4 --lr 5e-3 --init_temperature 2.0 --final_temperature 0.1 --anneal_steps 1000 --entropy_bonus 0.02 --device cuda --early_stop_patience 500 --early_stop_window 100 --save_every 100"
 MASTER_LOG="log_phase6_parallel_${REWARD}_seed${SEED}.txt"
 
+reward_args() {
+    case "$REWARD" in
+        l1l2|l1+l2)
+            echo "--fwi_type l2 --reward_l2_weight 1.0 --reward_l1_weight 1.0 --reward_tt_weight 0.0 --reward_prior_weight 0.0"
+            ;;
+        tt_only|tt)
+            echo "--fwi_type l2 --reward_l2_weight 0.0 --reward_l1_weight 0.0 --reward_tt_weight 1.0 --reward_prior_weight 0.0"
+            ;;
+        wasserstein|wasserstein_w2|ncc_zero|ncc_maxlag|envelope_ncc|awi)
+            echo "--fwi_type $REWARD --reward_l2_weight 1.0 --reward_l1_weight 0.0 --reward_tt_weight 0.0 --reward_prior_weight 0.0"
+            ;;
+        *)
+            echo "Unknown reward preset: $REWARD" >&2
+            echo "Allowed: l1l2, tt_only, wasserstein, wasserstein_w2, ncc_zero, ncc_maxlag, envelope_ncc, awi" >&2
+            return 2
+            ;;
+    esac
+}
+
+REWARD_ARGS=$(reward_args)
+
 log() {
     echo "[$(date '+%m-%d %H:%M:%S')] $*" | tee -a "$MASTER_LOG"
 }
@@ -60,8 +81,7 @@ run_model() {
     log "RUN gpu=${GPU} reward=${REWARD} cva=${IDX} seed=${SEED}"
     CUDA_VISIBLE_DEVICES=$GPU $PY train_rl_fwi.py $COMMON \
         --cva_file_idx "$IDX" --seed "$SEED" \
-        --fwi_type "$REWARD" \
-        --reward_l2_weight 1.0 --reward_l1_weight 0.0 --reward_tt_weight 0.0 --reward_prior_weight 0.0 \
+        $REWARD_ARGS \
         --steps 5000 --out_dir "$OUT" > "$RUN_LOG" 2>&1
     log "DONE gpu=${GPU} reward=${REWARD} cva=${IDX} seed=${SEED}"
 

@@ -90,7 +90,9 @@ def simulate_gathers(
     forward = AcquisitionForward(geom)
     v_t = torch.from_numpy(velocity.astype(np.float32))
     gathers = forward.simulate(v_t, device=device).detach().cpu().numpy().astype(np.float32)
-    if gathers.shape != (n_shots, n_receivers, nt):
+    if gathers.shape == (n_shots, nt, n_receivers):
+        gathers = np.transpose(gathers, (0, 2, 1))
+    elif gathers.shape != (n_shots, n_receivers, nt):
         raise ValueError(f"Expected [shot, receiver, time], got {gathers.shape}")
     peak = float(np.max(np.abs(gathers)))
     if peak > 0:
@@ -142,8 +144,10 @@ def plot_models_and_curves(
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="m/s")
 
     ax_reward = fig.add_subplot(gs[2, :2])
-    if "step" in metrics and "reward_l2_mean" in metrics:
-        ax_reward.plot(metrics["step"], metrics["reward_l2_mean"], color="#111827", label="single reward")
+    if "step" in metrics and "reward_l1_mean" in metrics and np.nanmax(np.abs(metrics["reward_l1_mean"])) > 0:
+        ax_reward.plot(metrics["step"], metrics["reward_l1_mean"], color="#16a34a", label="L1")
+    if "step" in metrics and "reward_l2_mean" in metrics and np.nanmax(np.abs(metrics["reward_l2_mean"])) > 0:
+        ax_reward.plot(metrics["step"], metrics["reward_l2_mean"], color="#111827", label="FWI")
     if "reward_tt_mean" in metrics and np.nanmax(np.abs(metrics["reward_tt_mean"])) > 0:
         ax_reward.plot(metrics["step"], metrics["reward_tt_mean"], color="#2563eb", label="TT")
     ax_reward.set_title("Reward curve")
