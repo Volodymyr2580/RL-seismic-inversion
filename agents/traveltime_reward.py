@@ -5,6 +5,8 @@ Travel-time reward — vectorised energy-ratio first-arrival picking.
 from __future__ import annotations
 import torch
 
+from agents.seismic_layout import reject_likely_receiver_time_swap
+
 
 def first_arrival_energy_ratio(
     p: torch.Tensor, dt: float = 0.001,
@@ -76,9 +78,11 @@ def traveltime_reward(
     p_obs: [n_shots, n_receivers, nt] or [n_traces, nt].
     """
     if p_pred.ndim == 4:
+        reject_likely_receiver_time_swap(p_pred, name="p_pred")
         G, n_shots, nr, nt = p_pred.shape
         p_pred_2d = p_pred.reshape(-1, nt)                         # [G*n_shots*nr, nt]
     elif p_pred.ndim == 3:
+        reject_likely_receiver_time_swap(p_pred, name="p_pred")
         G, nr, nt = p_pred.shape
         n_shots = 1
         p_pred_2d = p_pred.reshape(-1, nt)                         # [G*nr, nt]
@@ -86,6 +90,7 @@ def traveltime_reward(
         raise ValueError(f"p_pred must be 3-D or 4-D, got {p_pred.shape}")
 
     if p_obs.ndim == 3:
+        reject_likely_receiver_time_swap(p_obs, name="p_obs")
         obs_shots, obs_nr, nt_obs = p_obs.shape
         p_obs_2d = p_obs.reshape(-1, nt_obs)                      # [n_shots*nr, nt]
     elif p_obs.ndim == 2:

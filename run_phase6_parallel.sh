@@ -37,7 +37,7 @@ reward_args() {
             echo "--fwi_type l2 --reward_l2_weight 1.0 --reward_l1_weight 1.0 --reward_tt_weight 0.0 --reward_prior_weight 0.0"
             ;;
         tt_only|tt)
-            echo "--fwi_type l2 --reward_l2_weight 0.0 --reward_l1_weight 0.0 --reward_tt_weight 1.0 --reward_prior_weight 0.0"
+            echo "--fwi_type l2 --reward_l2_weight 0.0 --reward_l1_weight 0.0 --reward_tt_weight 1.0 --reward_tt_log --reward_prior_weight 0.0"
             ;;
         wasserstein|wasserstein_w2|ncc_zero|ncc_maxlag|envelope_ncc|awi)
             echo "--fwi_type $REWARD --reward_l2_weight 1.0 --reward_l1_weight 0.0 --reward_tt_weight 0.0 --reward_prior_weight 0.0"

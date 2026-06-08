@@ -8,6 +8,8 @@ import torch.nn.functional as F
 
 import deepwave
 
+from agents.seismic_layout import as_shot_receiver_time
+
 
 @dataclass(frozen=True)
 class OpenFWIVelFamilyGeometry:
@@ -118,7 +120,11 @@ class DeepwaveScalarForward2D:
                 pml_width=nbc,
                 pml_freq=freq,
             )
-            rec = out[-1]
-            rec = rec.permute(0, 2, 1).contiguous()
+            rec = as_shot_receiver_time(
+                out[-1],
+                n_receivers=self.geom.n_receivers,
+                nt=self.geom.nt,
+                name="deepwave receiver data",
+            )
         return rec
 

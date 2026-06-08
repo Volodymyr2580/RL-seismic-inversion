@@ -31,7 +31,7 @@ run_one() {
     # Build extra args
     local EXTRA=""
     if [ "$TT_W" != "0" ]; then
-        EXTRA="--reward_tt_weight $TT_W"
+        EXTRA="--reward_tt_weight $TT_W --reward_tt_log"
     fi
     
     for idx in $MODELS; do
@@ -51,7 +51,7 @@ run_one() {
         
         if [ "$FWI" = "tt" ]; then
             $PY train_rl_fwi.py $COMMON --cva_file_idx $idx --seed $SEED \
-                --fwi_type l2 --reward_l2_weight 0.0 --reward_tt_weight 1.0 --reward_l1_weight 0.0 --reward_prior_weight 0.0 \
+                --fwi_type l2 --reward_l2_weight 0.0 --reward_tt_weight 1.0 --reward_tt_log --reward_l1_weight 0.0 --reward_prior_weight 0.0 \
                 --steps $STEPS --out_dir "$OUT" &>/dev/null
         elif [ "$FWI" = "l1l2" ]; then
             $PY train_rl_fwi.py $COMMON --cva_file_idx $idx --seed $SEED \

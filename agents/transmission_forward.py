@@ -16,6 +16,8 @@ import torch.nn.functional as F
 
 import deepwave
 
+from agents.seismic_layout import as_shot_receiver_time
+
 
 @dataclass(frozen=True)
 class AcquisitionGeometry:
@@ -173,8 +175,13 @@ class AcquisitionForward:
             pml_width=nbc,
             pml_freq=g.freq,
         )
-        rec = out[-1]  # deepwave receiver data: [n_shots, nt, n_receivers]
-        return rec.permute(0, 2, 1).contiguous()  # → [n_shots, n_receivers, nt]
+        rec = out[-1]
+        return as_shot_receiver_time(
+            rec,
+            n_receivers=g.n_receivers,
+            nt=g.nt,
+            name="deepwave receiver data",
+        )
 
     @torch.no_grad()
     def simulate_batch(self, v_models: torch.Tensor, device: str = "cpu") -> torch.Tensor:

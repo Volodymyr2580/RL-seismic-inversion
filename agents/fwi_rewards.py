@@ -7,6 +7,8 @@ and return [G] rewards.
 """
 from __future__ import annotations
 import torch
+
+from agents.seismic_layout import reject_likely_receiver_time_swap
 import torch.nn.functional as F
 import math
 
@@ -43,6 +45,8 @@ def _flatten_traces(
             "p_pred and p_obs shapes are incompatible: "
             f"p_pred[1:]={tuple(p_pred.shape[1:])}, p_obs={tuple(p_obs.shape)}"
         )
+    reject_likely_receiver_time_swap(p_pred, name="p_pred")
+    reject_likely_receiver_time_swap(p_obs, name="p_obs")
 
     G, n_shots, n_receivers, nt = p_pred.shape
     n_traces = n_shots * n_receivers

@@ -44,6 +44,7 @@ from agents.beta_policy import (
 )
 from agents.velocity_reconstructor import VelocityReconstructor
 from agents.transmission_forward import AcquisitionForward, AcquisitionGeometry, TransmissionForward, TransmissionGeometry
+from agents.seismic_layout import assert_batch_shot_receiver_time, assert_shot_receiver_time
 from agents.rl_objectives import (
     RewardWeights,
     gdpo_advantage,
@@ -661,6 +662,13 @@ def train(config: TrainConfig):
         print(f"  Created synthetic layered model, "
               f"v range=[{v_true_np.min():.0f}, {v_true_np.max():.0f}]")
 
+    assert_shot_receiver_time(
+        p_data,
+        n_shots=config.n_shots,
+        n_receivers=config.n_receivers,
+        nt=config.nt,
+        name="p_data",
+    )
     print(f"  p_data shape: {tuple(p_data.shape)}")
     print(f"  v_true shape: {tuple(v_true.shape)}")
 
@@ -832,6 +840,14 @@ def train(config: TrainConfig):
 
         # Forward simulation (serial — deepwave limitation)
         p_pred = forward.simulate_batch(v_models, device=str(device))  # [G, n_shots, n_receivers, nt]
+        assert_batch_shot_receiver_time(
+            p_pred,
+            group_size=config.group_size,
+            n_shots=config.n_shots,
+            n_receivers=config.n_receivers,
+            nt=config.nt,
+            name="p_pred",
+        )
 
         # Apply lowpass filter if freq_band specified
         if config.freq_band:

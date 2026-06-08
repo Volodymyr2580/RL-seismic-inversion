@@ -37,7 +37,7 @@ for idx in $MODELS; do
     if [ "$FWI" = "tt" ]; then
         $PY train_rl_fwi.py $COMMON \
             --cva_file_idx $idx --seed $SEED \
-            --fwi_type l2 --reward_l2_weight 0.0 --reward_tt_weight 1.0 --reward_l1_weight 0.0 --reward_prior_weight 0.0 \
+            --fwi_type l2 --reward_l2_weight 0.0 --reward_tt_weight 1.0 --reward_tt_log --reward_l1_weight 0.0 --reward_prior_weight 0.0 \
             --steps 2500 --out_dir "$OUT"
     elif [ -n "$FWI2" ] && [ "$FWI2_W" != "0" ]; then
         # Multi-FWI
