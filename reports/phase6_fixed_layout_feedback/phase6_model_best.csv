@@ -1,0 +1,11 @@
+cva,best_reward,best_mae,best_final_mae,runner_up_reward,runner_up_best_mae
+1,wasserstein,21.44,41.19,ncc_maxlag,22.48
+2,tt_only,82.74,108.41,wasserstein,83.22
+5,wasserstein_w2,100.31,152.11,wasserstein,110.41
+6,ncc_zero,31.58,32.36,l1l2,32.77
+8,l1l2,21.27,23.84,wasserstein,47.61
+10,wasserstein_w2,124.63,159.86,wasserstein,146.31
+15,l1l2,13.34,14.37,wasserstein,22.81
+16,l1l2,33.23,33.85,ncc_zero,56.35
+18,wasserstein,4.53,6.43,wasserstein_w2,7.44
+50,tt_only,36.86,57.26,l1l2,42.03
