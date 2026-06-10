@@ -302,6 +302,11 @@ footer {
 }
 .phase6-figure a { display: block; }
 main img { max-width: 100%; }
+.formula-card .MathJax, .formula-card mjx-container {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 
 </style>
 </head>
@@ -345,9 +350,7 @@ main img { max-width: 100%; }
 <p>Phase6 的核心问题是：在统一 seismic tensor layout 后，单 reward 是否能稳定引导 B-spline RL 反演收敛？</p>
 <p>这次我们把所有 trace-wise reward 的输入统一为 canonical layout：</p>
 <div class="formula-card"><div class="formula-label">Equation</div>
-\[\begin{aligned}
-p_{\text{pred}} \in \mathbb{R}^{G \times N_s \times N_r \times N_t},\\ \qquad\\ p_{\text{obs}} \in \mathbb{R}^{N_s \times N_r \times N_t}
-\end{aligned}\]
+\[p_{\text{pred}} \in \mathbb{R}^{G \times N_s \times N_r \times N_t}, \qquad p_{\text{obs}} \in \mathbb{R}^{N_s \times N_r \times N_t}\]
 </div>
 <p>其中最后一维才是时间轴。这个约束非常关键，因为 W1/W2/NCC/AWI/TT 都是沿时间轴逐 trace 计算的 reward。</p>
 <p>实验矩阵如下：</p>
@@ -427,9 +430,7 @@ p_{\text{pred}} \in \mathbb{R}^{G \times N_s \times N_r \times N_t},\\ \qquad\\ 
 <figure class="phase6-figure"><a href="summary_figures/reward_final_minus_best_gap.png" target="_blank" rel="noopener"><img src="summary_figures/reward_final_minus_best_gap.png" alt="每个 reward 的 mean(final MAE - best MAE)。这个 gap 越小，说明策略最后越能留在好区域。" loading="lazy"></a><figcaption>每个 reward 的 mean(final MAE - best MAE)。这个 gap 越小，说明策略最后越能留在好区域。</figcaption></figure>
 <p>Phase6 一个非常重要的现象是：policy 经常能采样到一个很好的 best model，但 final model 会退化。</p>
 <div class="formula-card"><div class="formula-label">Equation</div>
-\[\begin{aligned}
-\Delta_{\text{drift}}\\ = \operatorname{MAE}(v_{\text{final}}, v_{\text{true}})\\ - \operatorname{MAE}(v_{\text{best}}, v_{\text{true}})
-\end{aligned}\]
+\[\Delta_{\text{drift}} = \operatorname{MAE}(v_{\text{final}}, v_{\text{true}}) - \operatorname{MAE}(v_{\text{best}}, v_{\text{true}})\]
 </div>
 <p>因此后续所有汇报都应该同时报告：</p>
 <ul>
@@ -443,14 +444,10 @@ p_{\text{pred}} \in \mathbb{R}^{G \times N_s \times N_r \times N_t},\\ \qquad\\ 
 <h2 id="7-cross-correlation-是否真的正确">7. Cross Correlation 是否真的正确？</h2>
 <p>目前代码中的 Cross Correlation 有两个版本：</p>
 <div class="formula-card"><div class="formula-label">Equation</div>
-\[\begin{aligned}
-R_{\text{NCC-zero}}\\ =\\ \operatorname{\operatorname{mean}}_{s,r}\\ \frac{\langle d_{\text{pred}}^{s,r}, d_{\text{obs}}^{s,r} \rangle}\\ {\|d_{\text{pred}}^{s,r}\|_2 \|d_{\text{obs}}^{s,r}\|_2 + \epsilon}
-\end{aligned}\]
+\[R_{\text{NCC-zero}} = \operatorname{mean}_{s,r} \frac{\langle d_{\text{pred}}^{s,r}, d_{\text{obs}}^{s,r} \rangle} {\|d_{\text{pred}}^{s,r}\|_2 \|d_{\text{obs}}^{s,r}\|_2 + \epsilon}\]
 </div>
 <div class="formula-card"><div class="formula-label">Equation</div>
-\[\begin{aligned}
-R_{\text{NCC-maxlag}}\\ =\\ \operatorname{\operatorname{mean}}_{s,r}\\ \left(\\ \max_{\tau \in [-\tau_{\max},\tau_{\max}]}\\ \rho_{s,r}(\tau)\\ - \lambda |\tau^\*_{s,r}|\\ \right)
-\end{aligned}\]
+\[R_{\text{NCC-maxlag}} = \operatorname{mean}_{s,r} \left( \max_{\tau \in [-\tau_{\max},\tau_{\max}]} \rho_{s,r}(\tau) - \lambda |\tau^\*_{s,r}| \right)\]
 </div>
 <p>其中每条 trace 都是在时间轴上做归一化互相关。sanity check 结果如下：</p>
 <div class="table-wrap"><table>
@@ -472,9 +469,7 @@ R_{\text{NCC-maxlag}}\\ =\\ \operatorname{\operatorname{mean}}_{s,r}\\ \left(\\ 
 </ul>
 <p>因此如果要真正验证导师说的 “Cross Correlation 应该稳定”，下一步应该做：</p>
 <div class="formula-card"><div class="formula-label">Equation</div>
-\[\begin{aligned}
-R_{\text{windowed-TL}}\\ =\\ -\operatorname{\operatorname{mean}}_{s,r,w}\\ q_{s,r,w}\\ \cdot\\ \operatorname{clip}\\ \left(\\ (\tau^\*_{s,r,w})^2, 0, \tau_{\max}^2\\ \right)
-\end{aligned}\]
+\[R_{\text{windowed-TL}} = -\operatorname{mean}_{s,r,w} q_{s,r,w} \cdot \operatorname{clip} \left( (\tau^\*_{s,r,w})^2, 0, \tau_{\max}^2 \right)\]
 </div>
 <p>其中窗口质量权重可以取：</p>
 <div class="formula-card"><div class="formula-label">Equation</div>
