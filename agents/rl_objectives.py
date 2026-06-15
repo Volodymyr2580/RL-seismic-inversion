@@ -64,6 +64,7 @@ class RewardWeights:
     si: float = 0.0
     prior: float = 0.0
     tt: float = 0.0
+    tether: float = 0.0
     fwi2: float = 0.0  # second FWI reward for multi-FWI mixing
 
     @classmethod
@@ -95,6 +96,7 @@ def gdpo_advantage(
         ("si", weights.si),
         ("prior", weights.prior),
         ("tt", weights.tt),
+        ("tether", weights.tether),
         ("fwi2", weights.fwi2),
     ]
 

@@ -111,6 +111,7 @@ class TrainConfig:
     # Clipping
     epsilon_low: float = 0.20
     epsilon_high: float = 0.27
+    ratio_token_mean: bool = False
 
     # Reward weights
     reward_l1_weight: float = 1.0
@@ -127,6 +128,8 @@ class TrainConfig:
     reward_prior_weight: float = 0.05
     reward_tt_weight: float = 0.0  # travel-time reward weight
     reward_tt_log: bool = False    # use log-scaled tt reward (amplifies small |Δt|)
+    reward_tether_weight: float = 0.0  # reward penalty for moving away from init velocity
+    tether_scale: float = 100.0  # m/s scale for init tether reward
     si_every: int = 10  # compute SI every N steps (expensive)
 
     # Best criterion
@@ -856,12 +859,25 @@ def train(config: TrainConfig):
         si=config.reward_si_weight,
         prior=config.reward_prior_weight,
         tt=config.reward_tt_weight,
+        tether=config.reward_tether_weight,
         fwi2=config.fwi_weight2,
     )
 
     # ---- Training state ----
     os.makedirs(config.out_dir, exist_ok=True)
     np.save(os.path.join(config.out_dir, "true_velocity.npy"), v_true.detach().cpu().numpy())
+    init_velocity_ref: torch.Tensor | None = None
+    initial_model_mae = float("nan")
+    if config.init_velocity_path:
+        init_velocity_ref_np = load_velocity_npy(
+            config.init_velocity_path,
+            nx_model=config.nx_model,
+            nz_model=config.nz_model,
+            name="init_velocity_path",
+        )
+        init_velocity_ref = torch.from_numpy(init_velocity_ref_np).to(device=device, dtype=torch.float32)
+        initial_model_mae = float((init_velocity_ref - v_true).abs().mean().detach().cpu().item())
+        np.save(os.path.join(config.out_dir, "provided_init_velocity.npy"), init_velocity_ref_np)
 
     # Save config
     config_path = os.path.join(config.out_dir, "config.json")
@@ -871,8 +887,9 @@ def train(config: TrainConfig):
 
     metrics_path = os.path.join(config.out_dir, "metrics.csv")
     with open(metrics_path, "w") as f:
-        f.write("step,reward_l1_mean,reward_l2_mean,reward_tt_mean,reward_prior_mean,"
+        f.write("step,reward_l1_mean,reward_l2_mean,reward_tt_mean,reward_prior_mean,reward_tether_mean,"
                 "mae_display,mae_oracle_best,best_mae_global,"
+                "initial_model_mae,delta_best_vs_init,"
                 "ratio_mean,ratio_std,clip_frac,temperature,entropy,wall_time\n")
 
     best_mae = float("inf")
@@ -999,6 +1016,14 @@ def train(config: TrainConfig):
             bound_weight=1.0,
         )  # [G]
 
+        # Init tether reward: discourage destructive movement away from a supplied init model.
+        r_tether = torch.zeros(config.group_size, device=device)
+        if config.reward_tether_weight > 0 and init_velocity_ref is not None:
+            tether_rmse = torch.sqrt(
+                (v_models - init_velocity_ref.unsqueeze(0)).pow(2).mean(dim=(1, 2)).clamp_min(1e-12)
+            )
+            r_tether = -tether_rmse / max(float(config.tether_scale), 1e-6)
+
         # SI reward (RTM imaging energy) — compute every si_every steps
         r_si = torch.zeros(config.group_size, device=device)
         if config.reward_si_weight > 0 and step % config.si_every == 0:
@@ -1042,6 +1067,7 @@ def train(config: TrainConfig):
         adv = gdpo_advantage(
             {"l1": r_l1.unsqueeze(1), "l2": r_l2.unsqueeze(1),
              "tt": r_tt.unsqueeze(1), "si": r_si.unsqueeze(1), "prior": r_prior.unsqueeze(1),
+             "tether": r_tether.unsqueeze(1),
              "fwi2": r_fwi2.unsqueeze(1)},
             reward_weights,
             batch_norm=False,
@@ -1116,7 +1142,7 @@ def train(config: TrainConfig):
                 epsilon_low=config.epsilon_low,
                 epsilon_high=config.epsilon_high,
                 guard_state=guard_state,
-                token_mean=False,
+                token_mean=bool(config.ratio_token_mean),
             )
 
             # Entropy bonus: prevent distribution collapse
@@ -1159,6 +1185,7 @@ def train(config: TrainConfig):
         r_l2_mean = float(r_l2.mean().item())
         r_tt_mean = float(r_tt.mean().item())
         r_prior_mean = float(r_prior.mean().item())
+        r_tether_mean = float(r_tether.mean().item())
         r_fwi2_mean = float(r_fwi2.mean().item()) if config.fwi_type2 else 0.0
         r_si_mean = float(r_si.mean().detach().cpu().item())
 
@@ -1184,9 +1211,12 @@ def train(config: TrainConfig):
             "reward_l1_mean": r_l1_mean,
             "reward_l2_mean": r_l2_mean,
             "reward_prior_mean": r_prior_mean,
+            "reward_tether_mean": r_tether_mean,
             "mae_display": mae_display,
             "mae_oracle_best": mae_oracle_best,
             "best_mae_global": best_mae,
+            "initial_model_mae": initial_model_mae,
+            "delta_best_vs_init": best_mae - initial_model_mae if math.isfinite(initial_model_mae) else float("nan"),
             "temperature": temperature,
             "entropy": ent,
         }
@@ -1194,8 +1224,10 @@ def train(config: TrainConfig):
         history.append(log_entry)
 
         with open(metrics_path, "a") as f:
-            f.write(f"{step},{r_l1_mean:.2f},{r_l2_mean:.2f},{r_tt_mean:.4f},{r_prior_mean:.4f},"
+            delta_best_vs_init = best_mae - initial_model_mae if math.isfinite(initial_model_mae) else float("nan")
+            f.write(f"{step},{r_l1_mean:.2f},{r_l2_mean:.2f},{r_tt_mean:.4f},{r_prior_mean:.4f},{r_tether_mean:.4f},"
                     f"{mae_display:.2f},{mae_oracle_best:.2f},{best_mae:.2f},"
+                    f"{initial_model_mae:.2f},{delta_best_vs_init:.2f},"
                     f"{ratio_stats['ratio_mean']:.6f},{ratio_stats['ratio_std']:.6f},"
                     f"{ratio_stats['clip_fraction']:.6f},{temperature:.4f},{ent:.4f},"
                     f"{wall_time:.1f}\n")
@@ -1205,9 +1237,9 @@ def train(config: TrainConfig):
                      f"R_L1={r_l1_mean:.1f} R_L2={r_l2_mean:.1f} "]
         if config.fwi_type2:
             log_parts.append(f"R_F2={r_fwi2_mean:.1f} ")
-        log_parts.append(f"R_TT={r_tt_mean:.3f} R_P={r_prior_mean:.3f} | ")
+        log_parts.append(f"R_TT={r_tt_mean:.3f} R_P={r_prior_mean:.3f} R_Tether={r_tether_mean:.3f} | ")
         log_parts.append(f"MAE_reward={mae_display:.1f} MAE_oracle={mae_oracle_best:.1f} "
-                         f"(global={best_mae:.1f}@{best_mae_step}) | "
+                         f"(global={best_mae:.1f}@{best_mae_step}, init={initial_model_mae:.1f}) | "
                          f"ratio={ratio_stats['ratio_mean']:.4f} "
                          f"clip={ratio_stats['clip_fraction']:.4f} | "
                          f"ent={ent:.4f} T={temperature:.3f} | "
@@ -1405,6 +1437,8 @@ def main():
     # Clipping
     parser.add_argument("--epsilon_low", type=float, default=0.20)
     parser.add_argument("--epsilon_high", type=float, default=0.27)
+    parser.add_argument("--ratio_token_mean", action="store_true", default=False,
+                        help="Use per-control-point PPO ratio instead of joint high-dimensional ratio")
 
     # Reward
     parser.add_argument("--reward_l1_weight", type=float, default=1.0)
@@ -1426,6 +1460,10 @@ def main():
                         help="AWI version: l1 (simple) or full (center+spread)")
     parser.add_argument("--reward_si_weight", type=float, default=0.0)
     parser.add_argument("--reward_prior_weight", type=float, default=0.05)
+    parser.add_argument("--reward_tether_weight", type=float, default=0.0,
+                        help="GDPO weight for init-model tether reward")
+    parser.add_argument("--tether_scale", type=float, default=100.0,
+                        help="Velocity RMSE scale in m/s for init tether reward")
     parser.add_argument("--si_every", type=int, default=10)
     parser.add_argument("--best_criterion", choices=["mae", "l2", "si"], default="l2")
 
