@@ -40,11 +40,13 @@ from agents.beta_policy import (
     GaussianMeanPolicy,
     LearnableBetaSplinePolicy,
     LearnableBetaMeanPolicy,
+    velocity_to_unit,
     unit_to_velocity,
 )
 from agents.velocity_reconstructor import VelocityReconstructor
 from agents.transmission_forward import AcquisitionForward, AcquisitionGeometry, TransmissionForward, TransmissionGeometry
 from agents.seismic_layout import assert_batch_shot_receiver_time, assert_shot_receiver_time
+from agents.Bspline import bspline2d_inverse
 from agents.rl_objectives import (
     RewardWeights,
     gdpo_advantage,
@@ -79,6 +81,8 @@ class TrainConfig:
     dt: float = 0.001
     freq: float = 15.0
     pml_width: int = 40
+    source_depth: str = "auto"
+    receiver_depth: str = "auto"
 
     # Policy
     policy_type: str = "mean"  # "mean" (μ+κ), "learnable" (α+β legacy), or "cnn"
@@ -139,12 +143,16 @@ class TrainConfig:
     guard_threshold: float = 0.05
 
     # Model source
-    model_source: str = "synthetic"  # "synthetic", "cva", "fva", or "smooth"
+    model_source: str = "synthetic"  # "synthetic", "cva", "fva", "smooth", or "npy"
+    model_path: str = ""
     cva_root: str = "data/CVA/CurveVel_A"
     cva_file_idx: int = 0
     cva_sample_idx: int = 0
     fva_root: str = "data/FVA_model"
     smooth_root: str = "data/smooth_models"
+    init_velocity_path: str = ""
+    init_velocity_lam: float = 1e-2
+    init_velocity_maxit: int = 180
 
     # Early stopping
     early_stop_patience: int = 500  # stop if no MAE improvement for N steps
@@ -206,6 +214,46 @@ def make_observation_from_velocity(
     v_true_t = torch.from_numpy(v_true).to(device=device, dtype=torch.float32)
     p_data = forward.simulate(v_true_t, device=device)
     return p_data, v_true_t
+
+
+def load_velocity_npy(path: str, *, nx_model: int, nz_model: int, name: str) -> np.ndarray:
+    if not path:
+        raise ValueError(f"{name} path is empty")
+    v = np.load(path).astype(np.float32)
+    if v.ndim == 3 and v.shape[0] == 1:
+        v = v[0]
+    if v.shape != (int(nx_model), int(nz_model)):
+        raise ValueError(f"{name} shape {v.shape} != ({nx_model},{nz_model}) from {path}")
+    if not np.isfinite(v).all():
+        raise ValueError(f"{name} contains NaN/Inf: {path}")
+    return v
+
+
+def initialize_policy_from_velocity(
+    policy,
+    init_velocity_np: np.ndarray,
+    *,
+    config: TrainConfig,
+    device: torch.device,
+) -> None:
+    """Initialize mean/Gaussian policy center from a deterministic velocity model."""
+    if config.policy_type not in ("mean", "gaussian"):
+        raise ValueError("--init_velocity_path currently supports --policy_type mean or gaussian")
+    init_t = torch.from_numpy(init_velocity_np.astype(np.float32)).to(device=device)
+    ctrl = bspline2d_inverse(
+        init_t,
+        (config.nx_ctrl, config.nz_ctrl),
+        lam=float(config.init_velocity_lam),
+        maxit=int(config.init_velocity_maxit),
+        tol=1e-12,
+        verbose=False,
+    )
+    unit = velocity_to_unit(ctrl, config.v_min, config.v_max).clamp(1e-4, 1.0 - 1e-4)
+    with torch.no_grad():
+        if config.policy_type == "mean":
+            policy.mu_raw.copy_(torch.logit(unit).to(policy.mu_raw.device, dtype=policy.mu_raw.dtype))
+        elif config.policy_type == "gaussian":
+            policy.mu.copy_(torch.logit(unit).to(policy.mu.device, dtype=policy.mu.dtype))
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +342,8 @@ def make_summary_figure(
     p_obs: torch.Tensor,
     p_best: torch.Tensor,
     history: list[dict],
+    dx: float = 10.0,
+    dt: float = 0.001,
 ):
     """Generate 2×3 summary figure for training monitoring."""
     import matplotlib
@@ -308,19 +358,20 @@ def make_summary_figure(
 
     vmin = float(v_true_np.min())
     vmax = float(v_true_np.max())
-    extent_km = [0, 0.7, 0.7, 0]  # 70 × 10m = 0.7 km
+    nx, nz = v_true_np.shape
+    extent_km = [0, nx * dx / 1000.0, nz * dx / 1000.0, 0]
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
 
-    # Row 1: Velocity models (data is [nz, nx]; imshow directly — z vertical, x horizontal)
-    im0 = axes[0, 0].imshow(v_true_np, origin="upper", cmap="turbo", vmin=vmin, vmax=vmax,
+    # Row 1: velocity arrays are stored as [nx, nz]; transpose for image rows=z, columns=x.
+    im0 = axes[0, 0].imshow(v_true_np.T, origin="upper", cmap="turbo", vmin=vmin, vmax=vmax,
                              aspect="equal", extent=extent_km)
     axes[0, 0].set_title("True Velocity")
     axes[0, 0].set_xlabel("x (km)")
     axes[0, 0].set_ylabel("Depth (km)")
     plt.colorbar(im0, ax=axes[0, 0], label="m/s")
 
-    im1 = axes[0, 1].imshow(v_best_np, origin="upper", cmap="turbo", vmin=vmin, vmax=vmax,
+    im1 = axes[0, 1].imshow(v_best_np.T, origin="upper", cmap="turbo", vmin=vmin, vmax=vmax,
                              aspect="equal", extent=extent_km)
     axes[0, 1].set_title(f"Best-of-G Velocity (step {step})")
     axes[0, 1].set_xlabel("x (km)")
@@ -328,7 +379,7 @@ def make_summary_figure(
     plt.colorbar(im1, ax=axes[0, 1], label="m/s")
 
     err = np.abs(v_best_np - v_true_np)
-    im2 = axes[0, 2].imshow(err, origin="upper", cmap="hot", aspect="equal", extent=extent_km)
+    im2 = axes[0, 2].imshow(err.T, origin="upper", cmap="hot", aspect="equal", extent=extent_km)
     axes[0, 2].set_title(f"|Best − True|  MAE={err.mean():.1f}")
     axes[0, 2].set_xlabel("x (km)")
     axes[0, 2].set_ylabel("Depth (km)")
@@ -345,7 +396,7 @@ def make_summary_figure(
     # extent: time 0→1s (1000 steps × 0.001s), receivers 0→0.7km (70 × 10m)
     axes[1, 0].imshow(p_obs_np[shot_idx].T, aspect="auto", cmap="seismic",
                        vmin=vmin_s, vmax=vmax_s, origin="upper",
-                       extent=[0, 0.7, 1.0, 0])
+                       extent=[0, p_obs_np.shape[1] * dx / 1000.0, p_obs_np.shape[2] * dt, 0])
     axes[1, 0].set_title(f"Observed Shot {shot_idx}")
     axes[1, 0].set_xlabel("Receiver x")
     axes[1, 0].set_ylabel("Time (s)")
@@ -384,6 +435,7 @@ def _save_progression_figure(
     v_final: torch.Tensor,
     best_mae: float,
     best_step: int,
+    dx: float = 10.0,
 ):
     """Save init → final → true progression comparison."""
     import matplotlib
@@ -396,7 +448,8 @@ def _save_progression_figure(
 
     vmin = float(v_true_np.min())
     vmax = float(v_true_np.max())
-    extent_km = [0, 0.7, 0.7, 0]
+    nx, nz = v_true_np.shape
+    extent_km = [0, nx * dx / 1000.0, nz * dx / 1000.0, 0]
 
     init_mae = np.abs(v_init_np - v_true_np).mean()
     final_mae = np.abs(v_final_np - v_true_np).mean()
@@ -409,7 +462,7 @@ def _save_progression_figure(
     ]
     models = [v_init_np, v_final_np, v_true_np]
     for ax, title, model in zip(axes[0], titles, models):
-        im = ax.imshow(model, origin="upper", cmap="turbo", vmin=vmin, vmax=vmax,
+        im = ax.imshow(model.T, origin="upper", cmap="turbo", vmin=vmin, vmax=vmax,
                        aspect="equal", extent=extent_km)
         ax.set_title(title)
         ax.set_xlabel("x (km)")
@@ -421,11 +474,11 @@ def _save_progression_figure(
     for ax, title, err in zip(axes[1], titles_r2, errors):
         if err is None:
             x_center = v_true_np.shape[0] // 2
-            ax.plot(v_true_np[x_center, :], np.arange(v_true_np.shape[1]) * 0.01,
+            ax.plot(v_true_np[x_center, :], np.arange(v_true_np.shape[1]) * dx / 1000.0,
                     "k-", label="True", linewidth=2)
-            ax.plot(v_init_np[x_center, :], np.arange(v_true_np.shape[1]) * 0.01,
+            ax.plot(v_init_np[x_center, :], np.arange(v_true_np.shape[1]) * dx / 1000.0,
                     "gray", label=f"Init (MAE={init_mae:.0f})", linewidth=1, alpha=0.7)
-            ax.plot(v_final_np[x_center, :], np.arange(v_true_np.shape[1]) * 0.01,
+            ax.plot(v_final_np[x_center, :], np.arange(v_true_np.shape[1]) * dx / 1000.0,
                     "b-", label=f"Final (MAE={final_mae:.0f})", linewidth=1.5)
             ax.invert_yaxis()
             ax.set_xlabel("Velocity (m/s)")
@@ -434,7 +487,7 @@ def _save_progression_figure(
             ax.legend(fontsize=9)
             ax.grid(True, alpha=0.3)
         else:
-            im = ax.imshow(err, origin="upper", cmap="hot",
+            im = ax.imshow(err.T, origin="upper", cmap="hot",
                            aspect="equal", extent=extent_km)
             ax.set_title(title)
             ax.set_xlabel("x (km)")
@@ -594,6 +647,8 @@ def train(config: TrainConfig):
         n_receivers=config.n_receivers,
         pml_width=config.pml_width,
         geometry=config.geometry,
+        source_depth=config.source_depth,
+        receiver_depth=config.receiver_depth,
     )
     if not geom.validate_receiver_z():
         raise RuntimeError(
@@ -654,6 +709,16 @@ def train(config: TrainConfig):
         p_data, v_true = make_observation_from_velocity(v_true_np, geom, str(device))
         print(f"  Loaded smooth CVA[{config.cva_file_idx}], "
               f"v range=[{v_true_np.min():.0f}, {v_true_np.max():.0f}]")
+    elif config.model_source == "npy":
+        v_true_np = load_velocity_npy(
+            config.model_path,
+            nx_model=config.nx_model,
+            nz_model=config.nz_model,
+            name="model_path",
+        )
+        p_data, v_true = make_observation_from_velocity(v_true_np, geom, str(device))
+        print(f"  Loaded NPY model: {config.model_path}")
+        print(f"  v range=[{v_true_np.min():.0f}, {v_true_np.max():.0f}]")
     else:
         v_true_np = make_synthetic_layered_model(
             config.nx_model, config.nz_model, config.v_min, config.v_max
@@ -706,6 +771,15 @@ def train(config: TrainConfig):
                 device=device,
             )
         p_data_input = None
+        if config.init_velocity_path:
+            init_velocity_np = load_velocity_npy(
+                config.init_velocity_path,
+                nx_model=config.nx_model,
+                nz_model=config.nz_model,
+                name="init_velocity_path",
+            )
+            initialize_policy_from_velocity(policy, init_velocity_np, config=config, device=device)
+            print(f"  Initialized mean policy from velocity: {config.init_velocity_path}")
     elif config.policy_type == "gaussian":
         policy = GaussianMeanPolicy(
             nx_ctrl=config.nx_ctrl,
@@ -714,6 +788,15 @@ def train(config: TrainConfig):
             v_max=config.v_max,
         ).to(device)
         p_data_input = None
+        if config.init_velocity_path:
+            init_velocity_np = load_velocity_npy(
+                config.init_velocity_path,
+                nx_model=config.nx_model,
+                nz_model=config.nz_model,
+                name="init_velocity_path",
+            )
+            initialize_policy_from_velocity(policy, init_velocity_np, config=config, device=device)
+            print(f"  Initialized Gaussian policy from velocity: {config.init_velocity_path}")
     elif config.policy_type == "latent":
         # Latent-space Gaussian policy (Phase III)
         from agents.latent_policy import LearnableLatentPolicy, VAEDecoder
@@ -1185,6 +1268,8 @@ def train(config: TrainConfig):
                 p_obs=p_data,
                 p_best=p_pred[display_best_idx] if config.group_size > 0 else p_pred[0],
                 history=history,
+                dx=config.dx,
+                dt=config.dt,
             )
 
             if best_mae_payload is not None:
@@ -1208,6 +1293,8 @@ def train(config: TrainConfig):
                     p_obs=p_data,
                     p_best=best_mae_payload["p_pred"].to(device=p_data.device),
                     history=history,
+                    dx=config.dx,
+                    dt=config.dt,
                 )
 
     # ---- Final ----
@@ -1224,6 +1311,7 @@ def train(config: TrainConfig):
             _save_progression_figure(
                 config.out_dir, v_true, v_init_best,
                 best_mae_payload["v_model"], best_mae, best_mae_step,
+                dx=config.dx,
             )
         except Exception as e:
             print(f"  [WARN] progression figure failed: {e}")
@@ -1284,6 +1372,11 @@ def main():
     parser.add_argument("--pml_width", type=int, default=40)
     parser.add_argument("--freq", type=float, default=15.0, help="Source frequency (Hz)")
     parser.add_argument("--freq_band", type=str, default="", help="Lowpass cutoff before reward, e.g. '0-5' or '0-10'")
+    parser.add_argument("--dx", type=float, default=10.0)
+    parser.add_argument("--dt", type=float, default=0.001)
+    parser.add_argument("--geometry", choices=["reflection", "transmission"], default="reflection")
+    parser.add_argument("--source_depth", choices=["auto", "top", "bottom"], default="auto")
+    parser.add_argument("--receiver_depth", choices=["auto", "top", "bottom"], default="auto")
 
     # Policy
     parser.add_argument("--policy_type", choices=["mean", "learnable", "cnn", "latent", "gaussian"], default="mean")
@@ -1335,7 +1428,6 @@ def main():
     parser.add_argument("--reward_prior_weight", type=float, default=0.05)
     parser.add_argument("--si_every", type=int, default=10)
     parser.add_argument("--best_criterion", choices=["mae", "l2", "si"], default="l2")
-    parser.add_argument("--geometry", choices=["reflection", "transmission"], default="reflection")
 
     # Temperature
     parser.add_argument("--init_temperature", type=float, default=2.0)
@@ -1350,12 +1442,16 @@ def main():
     parser.add_argument("--guard_threshold", type=float, default=0.05)
 
     # Data
-    parser.add_argument("--model_source", choices=["synthetic", "cva", "fva", "smooth"], default="synthetic")
+    parser.add_argument("--model_source", choices=["synthetic", "cva", "fva", "smooth", "npy"], default="synthetic")
+    parser.add_argument("--model_path", type=str, default="")
     parser.add_argument("--cva_root", type=str, default="data/CVA/CurveVel_A")
     parser.add_argument("--cva_file_idx", type=int, default=0)
     parser.add_argument("--cva_sample_idx", type=int, default=0)
     parser.add_argument("--fva_root", type=str, default="data/FVA_model")
     parser.add_argument("--smooth_root", type=str, default="data/smooth_models")
+    parser.add_argument("--init_velocity_path", type=str, default="")
+    parser.add_argument("--init_velocity_lam", type=float, default=1e-2)
+    parser.add_argument("--init_velocity_maxit", type=int, default=180)
 
     # Reward
     parser.add_argument("--reward_tt_weight", type=float, default=0.0, help="Travel-time reward weight")

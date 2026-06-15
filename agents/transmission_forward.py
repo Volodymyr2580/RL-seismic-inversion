@@ -1,8 +1,10 @@
 """
-Transmission-geometry forward simulator for Phase II.
+Transmission/reflection forward simulator for Phase II+.
 
-Sources:  surface (z=0 physical)
-Receivers: bottom (z=nz-1 physical), explicitly outside PML region.
+The default transmission setup preserves the Phase6 convention:
+sources at the top and receivers at the bottom. Newer experiments can
+explicitly set source_depth/receiver_depth to swap those roles, e.g.
+bottom sources and surface receivers for Phase7 sensitivity checks.
 
 Uses deepwave.scalar with PML-padded velocity grids.
 """
@@ -37,6 +39,8 @@ class AcquisitionGeometry:
     n_receivers: int = 70
     pml_width: int = 40
     geometry: str = "reflection"  # "reflection" or "transmission"
+    source_depth: str = "auto"  # "auto", "top", or "bottom"
+    receiver_depth: str = "auto"  # "auto", "top", or "bottom"
 
     @property
     def padded_nx(self) -> int:
@@ -53,23 +57,51 @@ class AcquisitionGeometry:
         xs = torch.linspace(0, self.nx_model - 1, steps=self.n_shots)
         return torch.round(xs).to(dtype=torch.long)
 
+    def receiver_x_positions(self) -> torch.Tensor:
+        """Evenly spaced receiver x-positions along the physical model width."""
+        if self.n_receivers <= 1:
+            return torch.tensor([self.nx_model // 2], dtype=torch.long)
+        xs = torch.linspace(0, self.nx_model - 1, steps=self.n_receivers)
+        return torch.round(xs).to(dtype=torch.long)
+
+    def _depth_to_z(self, depth: str, *, role: str) -> int:
+        depth = str(depth).lower()
+        if depth == "auto":
+            if role == "source":
+                depth = "top"
+            elif self.geometry == "reflection":
+                depth = "top"
+            else:
+                depth = "bottom"
+        if depth == "top":
+            return 0
+        if depth == "bottom":
+            return self.nz_model - 1
+        raise ValueError(f"{role}_depth must be 'auto', 'top', or 'bottom', got {depth!r}")
+
+    def source_z_index(self) -> int:
+        return self._depth_to_z(self.source_depth, role="source")
+
+    def receiver_z_index(self) -> int:
+        return self._depth_to_z(self.receiver_depth, role="receiver")
+
     def validate_receiver_z(self) -> bool:
         """Verify receivers are NOT in PML region."""
-        rec_z = 0 if self.geometry == "reflection" else self.nz_model - 1
+        rec_z = self.receiver_z_index()
         rec_z_padded = self.pml_width + rec_z
         pml_top_end = self.pml_width  # end of top PML
         pml_bot_start = self.pml_width + self.nz_model  # start of bottom PML
-        if self.geometry == "reflection":
+        if rec_z == 0:
             return rec_z_padded >= pml_top_end  # at or below top PML
-        else:
-            return rec_z_padded < pml_bot_start  # above bottom PML
+        return rec_z_padded < pml_bot_start  # above bottom PML
 
 
 class AcquisitionForward:
     """Transmission forward simulator using deepwave.scalar.
 
-    Sources fire from the top (z=0 physical), receivers record at the bottom
-    (z=nz_model-1 physical). The velocity model is padded with PML on all sides.
+    By default, sources fire from the top (z=0 physical), and receivers record
+    at the bottom for transmission or at the top for reflection. The velocity
+    model is padded with PML on all sides.
     Source and receiver positions are automatically offset by pml_width.
     """
 
@@ -91,21 +123,21 @@ class AcquisitionForward:
 
         g = self.geom
 
-        # Source locations: top of physical model
+        # Source locations.
         src_x = g.source_x_positions()
         source_locations = torch.zeros(g.n_shots, 1, 2, dtype=torch.long, device=device)
         source_locations[:, 0, 0] = src_x.to(device)  # x positions
-        source_locations[:, 0, 1] = 0                   # z = 0 (physical top)
+        source_locations[:, 0, 1] = g.source_z_index()
 
-        # Receiver locations: surface for reflection, bottom for transmission
+        # Receiver locations.
+        rec_x = g.receiver_x_positions()
         receiver_locations = torch.zeros(g.n_shots, g.n_receivers, 2, dtype=torch.long, device=device)
         receiver_locations[:, :, 0] = (
-            torch.arange(g.n_receivers, dtype=torch.long, device=device)
+            rec_x.to(device)
             .unsqueeze(0)
             .repeat(g.n_shots, 1)
         )
-        rec_z = 0 if g.geometry == "reflection" else g.nz_model - 1
-        receiver_locations[:, :, 1] = rec_z
+        receiver_locations[:, :, 1] = g.receiver_z_index()
 
         # Ricker wavelet
         peak_time = 1.5 / g.freq
